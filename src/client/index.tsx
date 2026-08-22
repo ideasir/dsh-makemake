@@ -221,18 +221,25 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
   const [chKey, setChKey] = useState('')
   const [keyConfigured, setKeyConfigured] = useState(false)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
+  // Live settings state — refreshed on every scope change
+  const [imageChannels, setImageChannels] = useState<Channel[]>([])
+  const [videoChannels, setVideoChannels] = useState<Channel[]>([])
+  const [selectedImageChannel, setSelectedImageChannel] = useState('')
+  const [selectedVideoChannel, setSelectedVideoChannel] = useState('')
 
   useEffect(() => {
-    try {
-      const v = scope.getSnapshot()
-      if (v.value?.enabled !== undefined) setEnabled(v.value.enabled)
-    } catch { /* ignore */ }
-    return scope.subscribe(() => {
+    const load = () => {
       try {
         const v = scope.getSnapshot()
         if (v.value?.enabled !== undefined) setEnabled(v.value.enabled)
+        setImageChannels(v.value?.imageChannels ?? [])
+        setVideoChannels(v.value?.videoChannels ?? [])
+        setSelectedImageChannel(v.value?.selectedImageChannel ?? '')
+        setSelectedVideoChannel(v.value?.selectedVideoChannel ?? '')
       } catch { /* ignore */ }
-    })
+    }
+    load()
+    return scope.subscribe(load)
   }, [])
 
   const toggleEnabled = async () => {
@@ -240,15 +247,8 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
     setEnabled(v => !v)
   }
 
-  const channels = openPanel === 'image'
-    ? (scope.getSnapshot().value?.imageChannels ?? [])
-    : openPanel === 'video'
-    ? (scope.getSnapshot().value?.videoChannels ?? [])
-    : []
-
-  const selectedId = openPanel === 'image'
-    ? scope.getSnapshot().value?.selectedImageChannel
-    : scope.getSnapshot().value?.selectedVideoChannel
+  const channels = openPanel === 'image' ? imageChannels : openPanel === 'video' ? videoChannels : []
+  const selectedId = openPanel === 'image' ? selectedImageChannel : selectedVideoChannel
 
   const startEdit = (type: 'image' | 'video', ch?: Channel) => {
     const id = ch?.id ?? `new-${Date.now()}`
@@ -269,7 +269,8 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
     if (!editing) return
     setSaveMsg(null)
     const key = editing.type === 'image' ? 'imageChannels' : 'videoChannels'
-    const current = [...(scope.getSnapshot().value?.[key] ?? [])]
+    const allChannels = editing.type === 'image' ? imageChannels : videoChannels
+    const current = [...allChannels]
     const isNew = editing.id.startsWith('new-')
     try {
       if (isNew) {
@@ -298,7 +299,8 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
 
   const deleteChannel = async (type: 'image' | 'video', id: string) => {
     const key = type === 'image' ? 'imageChannels' : 'videoChannels'
-    const current = [...(scope.getSnapshot().value?.[key] ?? [])]
+    const allChannels = type === 'image' ? imageChannels : videoChannels
+    const current = [...allChannels]
     await scope.set(key, current.filter((ch: any) => ch.id !== id))
   }
 
@@ -335,9 +337,9 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
       </div>
 
       <div className="dsh-mm-buttons">
-        <BigButton icon={<LucideImage size={22} />} label="出图模型" configured={!!(channels as any[]).length}
+        <BigButton icon={<LucideImage size={22} />} label="出图模型" count={imageChannels.length}
           active={openPanel === 'image'} onClick={() => setOpenPanel(p => p === 'image' ? null : 'image')} />
-        <BigButton icon={<LucideVideo size={22} />} label="出视频模型" configured={!!(channels as any[]).length}
+        <BigButton icon={<LucideVideo size={22} />} label="出视频模型" count={videoChannels.length}
           active={openPanel === 'video'} onClick={() => setOpenPanel(p => p === 'video' ? null : 'video')} />
       </div>
 
@@ -393,7 +395,7 @@ function VideoChannelPanel({
             <div style={{ fontSize: 13, fontWeight: 500 }}>{ch.name}</div>
             <div style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' }}>{ch.model}</div>
           </div>
-          <button type="button" onClick={() => { void scope.set(selectedId === ch.id ? '' : ch.id) }}
+          <button type="button" onClick={() => { void scope.set(type === 'image' ? 'selectedImageChannel' : 'selectedVideoChannel', selectedId === ch.id ? '' : ch.id) }}
             style={{ background: 'none', border: 'none', fontSize: 12, cursor: 'pointer', color: selectedId === ch.id ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-label-tertiary)' }}>
             {selectedId === ch.id ? '✓' : '○'}
           </button>
@@ -443,15 +445,16 @@ function VideoChannelPanel({
   )
 }
 
-function BigButton({ icon, label, tag, configured, active, onClick }: {
-  icon: ReactNode; label: string; tag?: string; configured: boolean; active: boolean; onClick: () => void
+function BigButton({ icon, label, tag, count, active, onClick }: {
+  icon: ReactNode; label: string; tag?: string; count: number; active: boolean; onClick: () => void
 }) {
   return (
     <button type="button" className={`dsh-mm-bigbtn ${active ? 'active' : ''}`} onClick={onClick}>
       {tag && <span className="dsh-mm-badge">{tag}</span>}
       <span className="dsh-mm-bigbtn-icon">{icon}</span>
       <span className="dsh-mm-bigbtn-label">{label}</span>
-      <span className={`dsh-mm-dot ${configured ? 'ok' : 'off'}`} />
+      {count > 0 && <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1 }}>{count} 个渠道</span>}
+      <span className={`dsh-mm-dot ${count > 0 ? 'ok' : 'off'}`} />
       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{
         marginTop: 2, transition: 'transform .15s', transform: active ? 'rotate(180deg)' : 'none',
         color: 'var(--dsw-alias-label-tertiary)',
@@ -608,29 +611,63 @@ function ImageResultCard(props: ImageCardProps) {
     imgRef.current.style.transform = `scale(${zoom})`
     imgRef.current.style.transformOrigin = 'center center'
   }, [zoom, offset])
+
   if (!block?.content) return null
   const imageBlocks = block.content.filter((b: any) => b.type === 'image' && b.attachment)
   const textBlocks = block.content.filter((b: any) => b.type === 'text' && b.text)
+
+  // 从文本块里提取 prompt（格式：已生成图片（模型，尺寸）：prompt）
+  let prompt = ''
+  for (const tb of textBlocks) {
+    const t = tb.text
+    if (t && /已生成图片|已生成视频/.test(t)) {
+      const match = t.match(/：(.+)$/)
+      if (match && match[1]) prompt = match[1]
+    }
+  }
+
+  const copyPrompt = () => {
+    void navigator.clipboard.writeText(prompt)
+  }
+
   if (block.isError) {
     return <div style={{ padding: '8px 12px', fontSize: 13, color: 'var(--dsw-alias-state-error-primary)', background: 'var(--dsw-alias-bg-layer-3)', borderRadius: 8, marginTop: 4 }}>图片生成失败：{block.error?.message ?? '未知错误'}</div>
   }
 
   if (imageBlocks.length > 0) {
-    return <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+    return <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4, width: '100%' }}>
       {imageBlocks.map((b: any, i: number) => {
         const att = b.attachment
         const url = `${window.location.origin}/plugins/dsh-makemake/image?attachmentId=${att?.attachmentId}`
         return (
-          <div key={i} style={{ cursor: 'zoom-in', position: 'relative', display: 'inline-block', alignSelf: 'flex-start', lineHeight: 0 }}
-            onClick={() => openModal(url)}>
-            <img src={url} alt="generated"
-              style={{ maxWidth: 350, maxHeight: 350, borderRadius: 8, border: '1px solid var(--dsw-alias-border-l2)', display: 'block', objectFit: 'contain' }}
-              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-            />
+          <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start', width: '100%' }}>
+            <div style={{ cursor: 'zoom-in', position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}
+              onClick={() => openModal(url)}>
+              <img src={url} alt="generated"
+                style={{ maxWidth: 350, maxHeight: 350, borderRadius: 8, border: '1px solid var(--dsw-alias-border-l2)', display: 'block', objectFit: 'contain' }}
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+              />
+            </div>
+            {/* 迭代操作按钮 */}
+            {prompt && (
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', width: '100%' }}>
+                <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', flex: 1,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 'calc(100% - 72px)' }}
+                  title={prompt}>{prompt}</span>
+                <button onClick={(e) => { e.stopPropagation(); copyPrompt() }}
+                  style={{ flex: 'none', fontSize: 11, padding: '2px 8px', borderRadius: 4,
+                    border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent',
+                    color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                  onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'var(--dsw-alias-bg-layer-1)' }}
+                  onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'transparent' }}>
+                  复制提示词
+                </button>
+              </div>
+            )}
           </div>
         )
       })}
-      {textBlocks.length > 0 && <p style={{ margin: 0, fontSize: 13, color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1.5 }}>{textBlocks.map((b: any) => b.text).join('')}</p>}
+      {textBlocks.length > 0 && !prompt && <p style={{ margin: 0, fontSize: 13, color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1.5 }}>{textBlocks.map((b: any) => b.text).join('')}</p>}
       {modalUrl && (
         <div className={`dsh-mm-modal ${dragging ? 'dragging' : ''} ${closing ? 'closing' : ''}`} onClick={closeModal}>
           <button className="dsh-mm-modal-close" onClick={closeModal}>✕</button>
@@ -644,6 +681,8 @@ function ImageResultCard(props: ImageCardProps) {
       )}
     </div>
   }
+
+  // 视频结果：纯文字链接
   if (textBlocks.length > 0) {
     return <div style={{ padding: '8px 12px', fontSize: 13, color: 'var(--dsw-alias-label-primary)', lineHeight: 1.5, marginTop: 4 }}>{textBlocks.map((b: any) => b.text).join('')}</div>
   }
