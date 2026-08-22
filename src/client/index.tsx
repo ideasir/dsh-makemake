@@ -133,14 +133,19 @@ export function apply(ctx: Context): void {
     return () => { style.remove() }
   }, 'dsh-makemake: styles')
 
-  // 只给 /make 命令高亮亮蓝色，不影响其他命令的默认颜色
+  // 只给 /make 命令高亮亮蓝色，其他命令保持默认颜色
   ctx.effect(() => {
     let mo: MutationObserver | null = null
     const paint = () => {
       document.querySelectorAll<HTMLElement>('mark[data-decoration="token"]').forEach(el => {
-        if (el.textContent?.startsWith('/make')) {
+        const text = el.textContent ?? ''
+        if (text.startsWith('/make')) {
           el.style.color = '#00d4ff'
           el.style.textShadow = '0 0 10px rgba(0,212,255,0.5)'
+        } else {
+          // 非 /make 命令：清除内联样式，恢复 DSH 默认高亮色
+          el.style.color = ''
+          el.style.textShadow = ''
         }
       })
     }
