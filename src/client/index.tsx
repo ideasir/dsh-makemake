@@ -447,6 +447,7 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
           editing={editing}
           scope={scope}
           chName={chName} chBaseURL={chBaseURL} chModel={chModel} chKey={chKey} keyConfigured={keyConfigured}
+          chPollMode={chPollMode} setChPollMode={setChPollMode}
           inputStyle={inputStyle} fieldStyle={fieldStyle} labelStyle={labelStyle}
           startEdit={startEdit} saveChannel={saveChannel} deleteChannel={deleteChannel}
           setChName={setChName} setChBaseURL={setChBaseURL} setChModel={setChModel} setChKey={setChKey}
@@ -461,6 +462,7 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
           editing={editing}
           scope={scope}
           chName={chName} chBaseURL={chBaseURL} chModel={chModel} chKey={chKey} keyConfigured={keyConfigured}
+          chPollMode={chPollMode} setChPollMode={setChPollMode}
           inputStyle={inputStyle} fieldStyle={fieldStyle} labelStyle={labelStyle}
           startEdit={startEdit} saveChannel={saveChannel} deleteChannel={deleteChannel}
           setChName={setChName} setChBaseURL={setChBaseURL} setChModel={setChModel} setChKey={setChKey}
@@ -473,6 +475,7 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
 
 function VideoChannelPanel({
   type, channels, selectedId, editing, scope, chName, chBaseURL, chModel, chKey, keyConfigured,
+  chPollMode, setChPollMode,
   inputStyle, fieldStyle, labelStyle, startEdit, saveChannel, deleteChannel,
   setChName, setChBaseURL, setChModel, setChKey, setKeyConfigured, setEditing, saveMsg,
 }: any) {
