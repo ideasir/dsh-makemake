@@ -77,6 +77,13 @@ export function apply(ctx: Context, config: Config = {}): void {
         { type: 'image', attachment: value.attachment },
         { type: 'text', text: `已生成图片（${value.model}，${value.output}）：${value.prompt}` },
       ],
+      presentationMeta: (args, value) => ({
+        kind: 'dsh-makemake',
+        attachment: value.attachment,
+        model: value.model,
+        output: value.output,
+        prompt: (args as { prompt: string }).prompt,
+      }),
     },
     async execute(args, exec): Promise<GeneratedValue> {
       // Read the LIVE settings (channel list + selection) from the scope.
@@ -121,6 +128,13 @@ export function apply(ctx: Context, config: Config = {}): void {
       if (!ctx.attachments.imageLimits.mediaTypes.includes(mediaType)) throw new Error(`不支持 ${mediaType} 格式`)
       const attachment = await ctx.attachments.saveImage({ data, mediaType, name: 'generated-image' })
       return { attachment, model, output: size, prompt: args.prompt }
+    },
+    presentResult: (_args, result) => {
+      const meta = result.meta as Record<string, unknown> | undefined
+      if (meta?.kind !== 'dsh-makemake') return undefined
+      const attachment = meta.attachment as ImageAttachmentRef | undefined
+      if (!attachment || typeof attachment.attachmentId !== 'string') return undefined
+      return { card: 'generic' as const, title: '已生成图片', content: [{ type: 'image' as const, attachment }] }
     },
   }))
 }
