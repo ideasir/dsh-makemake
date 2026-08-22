@@ -250,40 +250,71 @@ export function apply(ctx: Context, config: Config = {}): void {
         { type: 'text', text: `已生成视频（${value.model}，时长 ${value.duration}）：${value.prompt}` },
       ],
       presentationMeta: (args, value) => ({
-        kind: 'dsh-makemake-video', url: value.url,
-        model: value.model, duration: value.duration,
+        kind: 'dsh-makemake-video',
+        model: value.model,
+        duration: value.duration,
         prompt: (args as { prompt: string }).prompt,
       }),
     },
     async execute(args, exec): Promise<{ url: string; model: string; duration: string; prompt: string }> {
       const settings = current() as unknown as RuntimeSettings
-      const channel = resolveChannel(settings, 'video')
-      if (!channel) throw new Error('make_video 未配置视频渠道，请在设置页添加渠道。')
-      const credential = await ctx.credentials.resolve(channelCredentialRef(channel.id))
-      if (!credential?.value) throw new Error(`make_video 渠道「${channel.name}」未配置 API Key。`)
-      const baseURL = channel.baseURL.replace(/\/+$/, '')
-      const model = channel.model
+      const channels: Channel[] = settings.videoChannels ?? []
+      if (channels.length === 0) throw new Error('未配置视频生成渠道，请在设置页添加渠道。')
+      const selectedId = settings.selectedVideoChannel
+      const sorted = selectedId ? [...channels].sort((a, b) => (a.id === selectedId ? 0 : 1)) : channels
       const duration = args.duration ?? '5s'
-      const response = await fetch(`${baseURL}/videos/generations`, {
-        method: 'POST', redirect: 'error', signal: exec.signal,
-        headers: { authorization: `Bearer ${credential.value}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ model, prompt: args.prompt, duration, n: 1 }),
-      })
-      if (!response.ok) {
-        const text = (await response.text()).slice(0, 500)
-        throw new Error(`视频生成失败（HTTP ${response.status}）：${text}`)
+      const lastErr: string[] = []
+
+      for (const ch of sorted) {
+        const cred = await ctx.credentials.resolve(channelCredentialRef(ch.id))
+        if (!cred?.value) { lastErr.push(`渠道「${ch.name}」未配置 API Key`); continue }
+        const baseURL = ch.baseURL.replace(/\/+$/, '')
+        try {
+          // 提交视频生成任务
+          const submitResp = await fetch(`${baseURL}/v1/videos`, {
+            method: 'POST', redirect: 'error', signal: exec.signal,
+            headers: { authorization: `Bearer ${cred.value}`, 'content-type': 'application/json' },
+            body: JSON.stringify({ model: ch.model, prompt: args.prompt, duration, n: 1 }),
+          })
+          if (!submitResp.ok) {
+            const text = (await submitResp.text()).slice(0, 300)
+            throw new Error(`提交任务失败（HTTP ${submitResp.status}）：${text}`)
+          }
+          const submitData = await submitResp.json() as { id?: string; error?: { message?: string } }
+          if (submitData.error) throw new Error(submitData.error.message ?? 'API 返回错误')
+          const taskId = submitData.id
+          if (!taskId) throw new Error('API 返回了空任务 ID')
+
+          // 轮询任务状态（最多等 120 秒）
+          const pollUrl = `${baseURL}/v1/videos/${taskId}`
+          let videoTask
+          for (let i = 0; i < 60; i++) {
+            await new Promise(r => setTimeout(r, 2000))
+            const pollResp = await fetch(pollUrl, {
+              redirect: 'error', signal: exec.signal,
+              headers: { authorization: `Bearer ${cred.value}` },
+            })
+            if (!pollResp.ok) {
+              const text = (await pollResp.text()).slice(0, 300)
+              throw new Error(`查询任务状态失败（HTTP ${pollResp.status}）：${text}`)
+            }
+            videoTask = await pollResp.json() as { status?: string; video_url?: string; error?: { message?: string } }
+            if (videoTask.error) throw new Error(videoTask.error.message ?? '视频生成失败')
+            if (videoTask.status === 'succeeded') break
+            if (videoTask.status === 'failed') throw new Error(`视频生成失败（status: ${videoTask.status}）`)
+          }
+          if (!videoTask?.video_url) throw new Error('视频生成完成但未返回视频 URL')
+          return { url: videoTask.video_url, model: ch.model, duration, prompt: args.prompt }
+        } catch (e) {
+          lastErr.push(`渠道「${ch.name}」(${ch.baseURL}): ${e instanceof Error ? e.message : String(e)}`)
+        }
       }
-      const payload = await response.json() as { data?: Array<{ url?: string; b64_json?: string }> }
-      const video = payload.data?.[0]
-      if (!video?.url) throw new Error('视频生成返回了空结果')
-      return { url: video.url, model, duration, prompt: args.prompt }
+      throw new Error(`视频生成失败：所有 ${channels.length} 个渠道均不可用。\n详细：${lastErr.join('\n')}`)
     },
     presentResult: (_args, result) => {
       const meta = result.meta as Record<string, unknown> | undefined
       if (meta?.kind !== 'dsh-makemake-video') return undefined
-      const url = meta.url as string | undefined
-      if (!url) return undefined
-      return { card: 'generic', title: '已生成视频', content: [{ type: 'text', text: `视频链接：${url}` }] }
+      return { card: 'generic', title: '已生成视频' }
     },
   }))
 }
