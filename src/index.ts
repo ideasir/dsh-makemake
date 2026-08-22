@@ -98,104 +98,115 @@ export function apply(ctx: Context, config: Config = {}): void {
       }),
     },
     async execute(args, exec): Promise<{ attachment: ImageAttachmentRef; model: string; output: string; prompt: string }> {
-      const settings = current() as unknown as RuntimeSettings
-      const channel = resolveChannel(settings, 'image')
-      if (!channel) throw new Error('make_image 未配置图片渠道，请在设置页添加渠道。')
-      const credential = await ctx.credentials.resolve(channelCredentialRef(channel.id))
-      if (!credential?.value) throw new Error(`make_image 渠道「${channel.name}」未配置 API Key。`)
-      const baseURL = channel.baseURL.replace(/\/+$/, '')
-      const model = channel.model
-      const size = args.size ?? '1024x1024'
-      // 常见尺寸别名 → 标准格式
-      const sizeAlias: Record<string, string> = {
-        '1K': '1024x1024', '2K': '2048x2048', '4K': '3840x2160',
-        'square': '1024x1024', 'portrait': '768x1024', 'landscape': '1024x768',
-      }
-      const sizeRaw = sizeAlias[size.toLowerCase()] ?? size
-      const sizeMatch = sizeRaw.match(/^(\d+)x(\d+)$/)
-      if (!sizeMatch) throw new Error(`图片尺寸格式错误，应为 WIDTHxHEIGHT（如 "1024x1024"），收到: ${size}`)
-      const resolvedSize = sizeMatch[1] + 'x' + sizeMatch[2]
-      // 将客户端传入的图片URL（可能含SSH隧道端口）转换为服务端直连地址
-      const dshUrl = new URL(`http://127.0.0.1:3080`)
-      const normalizeImageUrl = (url: string) => url.replace(/^https?:\/\/[^/]+/, dshUrl.origin)
-      const srcImage = normalizeImageUrl(args.image?.trim() ?? '')
-      // 图生图策略: 优先 /images/edits (multipart)，404 时降级到 /images/generations
-      let response: Response
-      if (srcImage) {
-        // 解析参考图：支持本机附件 URL、本地路径、远程 URL
-        let refBytes: BlobPart
-        let refType = 'image/png'
-        const attachmentMatch = srcImage.match(/attachmentId=(sha256:[0-9a-f]+)/)
-        if (attachmentMatch?.[1]) {
-          // 本机附件：直接从磁盘读取
-          const hash = attachmentMatch[1].replace(/^sha256:/, '')
-          const filePath = path.join(dshHome, 'attachments', 'v1', 'objects', hash.slice(0, 2), hash)
-          refBytes = new Uint8Array(await fs.readFile(filePath))
-        } else if (/^https?:\/\//.test(srcImage)) {
-          const imgResp = await fetch(srcImage, { redirect: 'follow', signal: exec.signal })
-          if (!imgResp.ok) throw new Error(`参考图读取失败（HTTP ${imgResp.status}）`)
-          refBytes = new Uint8Array(await imgResp.arrayBuffer())
-          const ct = (imgResp.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase() ?? ''
-          if (['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(ct)) refType = ct
-        } else {
-          refBytes = new Uint8Array(await fs.readFile(srcImage))
-        }
-        const form = new FormData()
-        form.append('model', model)
-        form.append('prompt', args.prompt)
-        form.append('n', '1')
-        form.append('size', resolvedSize)
-        form.append('image', new Blob([refBytes], { type: refType }), 'reference.png')
-        response = await fetch(`${baseURL}/images/edits`, {
-          method: 'POST', redirect: 'error', signal: exec.signal,
-          headers: { authorization: `Bearer ${credential.value}` },
-          body: form,
-        })
-        if (!response.ok && response.status === 404) {
-          // 降级：带图片 URL 在 prompt 中走文生图
-          response = await fetch(`${baseURL}/images/generations`, {
-            method: 'POST', redirect: 'error', signal: exec.signal,
-            headers: { authorization: `Bearer ${credential.value}`, 'content-type': 'application/json' },
-            body: JSON.stringify({ model, prompt: `[参考图片: ${srcImage}] ${args.prompt}`, size: resolvedSize, n: 1 }),
-          })
-        }
-      } else {
-        response = await fetch(`${baseURL}/images/generations`, {
-          method: 'POST', redirect: 'error', signal: exec.signal,
-          headers: { authorization: `Bearer ${credential.value}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ model, prompt: args.prompt, size: resolvedSize, n: 1 }),
-        })
-      }
-      if (!response.ok) {
-        const text = (await response.text()).slice(0, 500)
-        throw new Error(`图片生成失败（HTTP ${response.status}）：${text}`)
-      }
-      const payload = await response.json() as { data?: Array<{ b64_json?: string; url?: string }> }
-      const image = payload.data?.[0]
-      if (!image) throw new Error('图片生成返回了空结果')
-      let data: Uint8Array
-      let mediaType: ImageAttachmentRef['mediaType']
-      if (image.b64_json) {
-        const clean = image.b64_json.replace(/\s+/g, '')
-        if (!clean.length) throw new Error('图片生成返回了空 base64 数据')
-        data = new Uint8Array(Buffer.from(clean, 'base64'))
-        mediaType = 'image/png'
-      } else if (image.url) {
-        const imgResp = await fetch(image.url, { redirect: 'follow', signal: exec.signal })
-        if (!imgResp.ok) throw new Error(`图片下载失败（HTTP ${imgResp.status}）`)
-        const ct = (imgResp.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase() ?? ''
-        mediaType = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(ct)
-          ? ct as ImageAttachmentRef['mediaType'] : 'image/png'
-        data = new Uint8Array(await imgResp.arrayBuffer())
-      } else {
-        throw new Error('图片生成返回了未知格式')
-      }
-      const maxBytes = ctx.attachments.imageLimits.maxImageBytes
-      if (data.byteLength > maxBytes) throw new Error(`图片超出 ${maxBytes} 字节限制`)
-      if (!ctx.attachments.imageLimits.mediaTypes.includes(mediaType)) throw new Error(`不支持 ${mediaType} 格式`)
-      const attachment = await ctx.attachments.saveImage({ data, mediaType, name: 'generated-image' })
-      return { attachment, model, output: size, prompt: args.prompt }
-    },
+          const settings = current() as unknown as RuntimeSettings
+          const channels: Channel[] = settings.imageChannels ?? []
+          if (channels.length === 0) throw new Error('未配置图片生成渠道，请在设置页添加渠道。')
+          const sizeAlias: Record<string, string> = {
+            '1K': '1024x1024', '2K': '2048x2048', '4K': '3840x2160',
+            'square': '1024x1024', 'portrait': '768x1024', 'landscape': '1024x768',
+          }
+          const sizeRaw = sizeAlias[(args.size ?? '1024x1024').toLowerCase()] ?? args.size ?? '1024x1024'
+          const sizeMatch = sizeRaw.match(/^(\d+)x(\d+)$/)
+          if (!sizeMatch) throw new Error(`尺寸格式错误，应为 WIDTHxHEIGHT（如 "1024x1024"），收到: ${args.size}`)
+          const resolvedSize = sizeMatch[1] + 'x' + sizeMatch[2]
+          const dshUrl = new URL(`http://127.0.0.1:3080`)
+          const normalizeImageUrl = (url: string) => url.replace(/^https?:\/\/[^/]+/, dshUrl.origin)
+          const srcImage = normalizeImageUrl(args.image?.trim() ?? '')
+
+          // 按「已选渠道优先，其次其余渠道」排序
+          const selectedId = settings.selectedImageChannel
+          const sorted = selectedId
+            ? [...channels].sort((a, b) => (a.id === selectedId ? 0 : 1))
+            : channels
+
+          const lastErr: string[] = []
+          for (const ch of sorted) {
+            const cred = await ctx.credentials.resolve(channelCredentialRef(ch.id))
+            if (!cred?.value) { lastErr.push(`渠道「${ch.name}」未配置 API Key`); continue }
+            const baseURL = ch.baseURL.replace(/\/+$/, '')
+            const model = ch.model
+            let response: Response
+            try {
+              if (srcImage) {
+                let refBytes: BlobPart = new Uint8Array([])
+                let refType = 'image/png'
+                const am = srcImage.match(/attachmentId=(sha256:[0-9a-f]+)/)
+                if (am?.[1]) {
+                  const hash = am[1].replace(/^sha256:/, '')
+                  const fp = path.join(dshHome, 'attachments', 'v1', 'objects', hash.slice(0, 2), hash)
+                  refBytes = new Uint8Array(await fs.readFile(fp))
+                } else if (/^https?:\/\//.test(srcImage)) {
+                  const r2 = await fetch(srcImage, { redirect: 'follow', signal: exec.signal })
+                  if (!r2.ok) throw new Error(`参考图读取失败（HTTP ${r2.status}）`)
+                  refBytes = new Uint8Array(await r2.arrayBuffer())
+                  const ct = (r2.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase() ?? ''
+                  if (['image/png','image/jpeg','image/webp','image/gif'].includes(ct)) refType = ct
+                } else {
+                  refBytes = new Uint8Array(await fs.readFile(srcImage))
+                }
+                const form = new FormData()
+                form.append('model', model)
+                form.append('prompt', args.prompt)
+                form.append('n', '1')
+                form.append('size', resolvedSize)
+                form.append('image', new Blob([refBytes], { type: refType }), 'reference.png')
+                response = await fetch(`${baseURL}/images/edits`, {
+                  method: 'POST', redirect: 'error', signal: exec.signal,
+                  headers: { authorization: `Bearer ${cred.value}` },
+                  body: form,
+                })
+                if (!response.ok && response.status === 404) {
+                  response = await fetch(`${baseURL}/images/generations`, {
+                    method: 'POST', redirect: 'error', signal: exec.signal,
+                    headers: { authorization: `Bearer ${cred.value}`, 'content-type': 'application/json' },
+                    body: JSON.stringify({ model, prompt: `[参考图片: ${srcImage}] ${args.prompt}`, size: resolvedSize, n: 1 }),
+                  })
+                }
+              } else {
+                response = await fetch(`${baseURL}/images/generations`, {
+                  method: 'POST', redirect: 'error', signal: exec.signal,
+                  headers: { authorization: `Bearer ${cred.value}`, 'content-type': 'application/json' },
+                  body: JSON.stringify({ model, prompt: args.prompt, size: resolvedSize, n: 1 }),
+                })
+              }
+              if (!response.ok) {
+                const text = (await response.text()).slice(0, 300)
+                throw new Error(`HTTP ${response.status}: ${text}`)
+              }
+              // 成功
+              const payload = await response.json() as { data?: Array<{ b64_json?: string; url?: string }> }
+              const image = payload.data?.[0]
+              if (!image) throw new Error('API 返回空结果')
+              let data: Uint8Array; let mediaType: ImageAttachmentRef['mediaType'] = 'image/png'
+              if (image.b64_json) {
+                const clean = image.b64_json.replace(/\s+/g, '')
+                if (!clean.length) throw new Error('返回空 base64 数据')
+                data = new Uint8Array(Buffer.from(clean, 'base64'))
+              } else if (image.url) {
+                const imgResp = await fetch(image.url, { redirect: 'follow', signal: exec.signal })
+                if (!imgResp.ok) throw new Error(`图片下载失败（HTTP ${imgResp.status}）`)
+                const ct = (imgResp.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase() ?? ''
+                mediaType = ['image/png','image/jpeg','image/webp','image/gif'].includes(ct)
+                  ? ct as ImageAttachmentRef['mediaType'] : 'image/png'
+                data = new Uint8Array(await imgResp.arrayBuffer())
+              } else throw new Error('返回数据格式未知')
+              const maxBytes = ctx.attachments.imageLimits.maxImageBytes
+              if (data.byteLength > maxBytes) throw new Error(`图片超出 ${maxBytes} 字节限制`)
+              if (!ctx.attachments.imageLimits.mediaTypes.includes(mediaType)) throw new Error(`不支持 ${mediaType} 格式`)
+              const attachment = await ctx.attachments.saveImage({ data, mediaType, name: 'generated-image' })
+              return { attachment, model, output: resolvedSize, prompt: args.prompt }
+            } catch (e) {
+              lastErr.push(`渠道「${ch.name}」(${ch.baseURL}): ${e instanceof Error ? e.message : String(e)}`)
+            }
+          }
+          // 全部失败
+          const detail = lastErr.join('\n')
+          throw new Error(
+            `图片生成失败：所有 ${channels.length} 个渠道均不可用。\n` +
+            `当前选中: ${selectedId ? `「${channels.find(c=>c.id===selectedId)?.name}」` : '未指定'}\n\n` +
+            `详细错误：\n${detail}`
+          )
+        },
     presentResult: (_args, result) => {
       const meta = result.meta as Record<string, unknown> | undefined
       if (meta?.kind !== 'dsh-makemake') return undefined
