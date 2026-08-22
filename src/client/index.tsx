@@ -17,6 +17,8 @@ interface Channel {
   name: string
   baseURL: string
   model: string
+  keyCount?: number
+  pollMode?: 'round-robin' | 'sequential'
 }
 
 interface MakemakeSettings {
@@ -296,6 +298,7 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
   const [chModel, setChModel] = useState('')
   const [chKey, setChKey] = useState('')
   const [keyConfigured, setKeyConfigured] = useState(false)
+  const [chPollMode, setChPollMode] = useState<'round-robin' | 'sequential'>('round-robin')
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
   const [imageChannels, setImageChannels] = useState<Channel[]>([])
   const [videoChannels, setVideoChannels] = useState<Channel[]>([])
@@ -307,10 +310,24 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
       try {
         const v = scope.getSnapshot()
         if (v.value?.enabled !== undefined) setEnabled(v.value.enabled)
-        setImageChannels(v.value?.imageChannels ?? [])
-        setVideoChannels(v.value?.videoChannels ?? [])
+        const imgChs = v.value?.imageChannels ?? []
+        const vidChs = v.value?.videoChannels ?? []
+        // 为每个渠道加载 keyCount
+        const loadKeyCounts = async (chs: Channel[]) => {
+          const refs = chs.map(c => credentialRef(c.id))
+          if (refs.length === 0) return
+          const res = await pluginSettings.describeCredentials(refs)
+          if (!res.ok) return
+          for (const c of chs) {
+            const cred = res.credentials[credentialRef(c.id)]
+            c.keyCount = cred?.configured ? 1 : 0 // 后续由 KeyPool 返回实际数量
+          }
+        }
+        setImageChannels(imgChs)
+        setVideoChannels(vidChs)
         setSelectedImageChannel(v.value?.selectedImageChannel ?? '')
         setSelectedVideoChannel(v.value?.selectedVideoChannel ?? '')
+        void loadKeyCounts([...imgChs, ...vidChs])
       } catch { /* ignore */ }
     }
     load()
@@ -332,10 +349,14 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
     setChBaseURL(ch?.baseURL ?? '')
     setChModel(ch?.model ?? '')
     setChKey('')
+    setChPollMode(ch?.pollMode ?? 'round-robin')
     setKeyConfigured(false)
     if (ch) {
       void pluginSettings.describeCredentials([credentialRef(ch.id)]).then(res => {
-        if (res.ok) setKeyConfigured(res.credentials[credentialRef(ch.id)]?.configured ?? false)
+        if (res.ok) {
+          const cred = res.credentials[credentialRef(ch.id)]
+          setKeyConfigured(cred?.configured ?? false)
+        }
       })
     }
   }
@@ -350,7 +371,7 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
     try {
       if (isNew) {
         const newId = `ch-${Date.now()}`
-        const newCh: Channel = { id: newId, name: chName || chModel, baseURL: chBaseURL, model: chModel }
+        const newCh: Channel = { id: newId, name: chName || chModel, baseURL: chBaseURL, model: chModel, pollMode: chPollMode }
         if (chKey.trim()) {
           const cred = await pluginSettings.setCredential(credentialRef(newId), chKey.trim())
           if (!cred.ok) throw new Error(cred.error)
@@ -361,7 +382,7 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
           const cred = await pluginSettings.setCredential(credentialRef(editing.id), chKey.trim())
           if (!cred.ok) throw new Error(cred.error)
         }
-        const updated = current.map((ch: any) => ch.id === editing.id ? { ...ch, name: chName, baseURL: chBaseURL, model: chModel } : ch)
+        const updated = current.map((ch: any) => ch.id === editing.id ? { ...ch, name: chName, baseURL: chBaseURL, model: chModel, pollMode: chPollMode } : ch)
         await scope.set(key, updated)
       }
       setSaveMsg('✓ 已保存')
@@ -467,8 +488,18 @@ function VideoChannelPanel({
           background: selectedId === ch.id ? 'color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent)' : 'transparent',
         }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 500 }}>{ch.name}</div>
-            <div style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' }}>{ch.model}</div>
+            <div style={{ fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {ch.name}
+              {ch.keyCount > 0 && (
+                <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--dsw-alias-label-tertiary)', background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 999, padding: '0 6px', lineHeight: '18px' }}>
+                  {ch.keyCount} Key
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', display: 'flex', gap: 6, alignItems: 'center' }}>
+              {ch.model}
+              {ch.pollMode && <span style={{ color: 'var(--dsw-alias-label-caption)' }}>· {ch.pollMode === 'round-robin' ? '轮询' : '顺序'}</span>}
+            </div>
           </div>
           <button type="button" onClick={() => { void scope.set(type === 'image' ? 'selectedImageChannel' : 'selectedVideoChannel', selectedId === ch.id ? '' : ch.id) }}
             style={{ background: 'none', border: 'none', fontSize: 12, cursor: 'pointer', color: selectedId === ch.id ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-label-tertiary)' }}>
@@ -500,11 +531,26 @@ function VideoChannelPanel({
             <input style={inputStyle} value={chModel} onChange={e => setChModel(e.target.value)} placeholder={type === 'image' ? 'gpt-image-2' : 'sora'} />
           </div>
           <div style={fieldStyle}>
-            <label style={labelStyle}>API Key（每行一个，自动轮询）</label>
-            <textarea style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }} autoComplete="off" value={chKey} onChange={e => setChKey(e.target.value)}
-              placeholder={keyConfigured ? '留空保持已配置的 Key' : '每行一个 API Key\n自动轮询，429/限流自动跳过'} />
-            {keyConfigured && <span style={{ fontSize: 11, color: 'var(--dsw-alias-state-success-primary)' }}>✓ Key 已配置</span>}
-          </div>
+                              <label style={labelStyle}>API Key（每行一个，自动轮询）</label>
+                              <textarea style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }} autoComplete="off" value={chKey} onChange={e => setChKey(e.target.value)}
+                                placeholder={keyConfigured ? '留空保持已配置的 Key' : '每行一个 API Key\n自动轮询，429/限流自动跳过'} />
+                              {keyConfigured && <span style={{ fontSize: 11, color: 'var(--dsw-alias-state-success-primary)' }}>✓ Key 已配置</span>}
+                            </div>
+                            <div style={fieldStyle}>
+                              <label style={labelStyle}>轮询方式</label>
+                              <div style={{ display: 'flex', gap: 8 }}>
+                                <button type="button" onClick={() => setChPollMode('round-robin')}
+                                  style={{ flex: 1, padding: '6px 10px', fontSize: 12, borderRadius: 6, cursor: 'pointer',
+                                    border: chPollMode === 'round-robin' ? '2px solid var(--dsw-alias-brand-primary)' : '1px solid var(--dsw-alias-border-l2)',
+                                    background: chPollMode === 'round-robin' ? 'color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent)' : 'transparent',
+                                    color: 'var(--dsw-alias-label-primary)' }}>轮询（轮流使用）</button>
+                                <button type="button" onClick={() => setChPollMode('sequential')}
+                                  style={{ flex: 1, padding: '6px 10px', fontSize: 12, borderRadius: 6, cursor: 'pointer',
+                                    border: chPollMode === 'sequential' ? '2px solid var(--dsw-alias-brand-primary)' : '1px solid var(--dsw-alias-border-l2)',
+                                    background: chPollMode === 'sequential' ? 'color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent)' : 'transparent',
+                                    color: 'var(--dsw-alias-label-primary)' }}>顺序（用完再换）</button>
+                              </div>
+                            </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center' }}>
             {saveMsg && (
               <span style={{ fontSize: 12, color: saveMsg.startsWith('✓') ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>

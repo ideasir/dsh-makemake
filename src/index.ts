@@ -325,7 +325,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         const baseURL = ch.baseURL.replace(/\/+$/, '')
         try {
           // 提交视频生成任务
-          const submitResp = await fetch(`${baseURL}/v1/videos`, {
+          const submitResp = await fetch(`${baseURL}/videos`, {
             method: 'POST', redirect: 'error', signal: exec.signal,
             headers: { authorization: `Bearer ${cred.value}`, 'content-type': 'application/json' },
             body: JSON.stringify({ model: ch.model, prompt: args.prompt, duration: parseInt(duration, 10) || 5, n: 1 }),
@@ -340,7 +340,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           if (!taskId) throw new Error('API 返回了空任务 ID')
 
           // 轮询任务状态（最多等 120 秒）
-          const pollUrl = `${baseURL}/v1/videos/${taskId}`
+          const pollUrl = `${baseURL}/videos/${taskId}`
           let videoTask
           for (let i = 0; i < 60; i++) {
             await new Promise(r => setTimeout(r, 2000))
