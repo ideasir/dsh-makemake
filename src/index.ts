@@ -4,17 +4,20 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import type {} from '@deepseek-ai/dsh-host-webserver'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { Config } from './config.js'
+import { IMAGE_ROUTE, serveImage } from './image-route.js'
 import { CREATION_NAMESPACE } from './shared.js'
 
 export { Config } from './config.js'
+export { IMAGE_ROUTE } from './image-route.js'
 
 /** Cordis plugin name. */
 export const name = 'dsh-makemake'
 /** Host services required by the Bundle. */
-export const inject = ['tools', 'attachments', 'credentials', 'settings']
+export const inject = ['tools', 'attachments', 'credentials', 'webServer', 'settings']
 
 interface GeneratedValue {
   attachment: ImageAttachmentRef
@@ -52,14 +55,28 @@ function resolveChannel(settings: RuntimeSettings, type: 'image' | 'video'): Cha
   return selected ?? channels[0]
 }
 
-/** Register settings and the model-callable tool. */
+/** Register settings, the image route, and the model-callable tool. */
 export function apply(ctx: Context, config: Config = {}): void {
   const scope = ctx.settings.register(settingsNamespace(CREATION_NAMESPACE), Config, { base: config })
   let current: () => Config = () => scope.get()
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact', path: IMAGE_ROUTE,
+    handler: (req, res) => serveImage(req, res, {
+      readImage: async (ref) => {
+        const fs = await import('node:fs/promises')
+        const path = await import('node:path')
+        const dshHome = process.env.DSH_HOME ?? '/root/.dsh'
+        const hash = ref.attachmentId.replace(/^sha256:/, '')
+        const filePath = path.join(dshHome, 'attachments', 'v1', 'objects', hash.slice(0, 2), hash)
+        const data = await fs.readFile(filePath)
+        return { ref, data } as any
+      },
+    }),
+  }), 'dsh-makemake: image route')
 
   ctx.tools.register(defineTool({
-    name: 'generate_image',
-    description: 'Generate one image using the configured channel. Use when the user asks to create, draw, or generate an image.',
+    name: 'make_image',
+    description: 'Generate one image using the Make Make configured channel. Use when the user asks to create, draw, or generate an image.',
     parameters: {
       prompt: { type: 'string', required: true, description: 'Complete description of the image to generate.' },
       size: { type: 'string', description: 'Optional image size, e.g. "1024x1024" or "2K".' },
@@ -86,12 +103,11 @@ export function apply(ctx: Context, config: Config = {}): void {
       }),
     },
     async execute(args, exec): Promise<GeneratedValue> {
-      // Read the LIVE settings (channel list + selection) from the scope.
       const settings = current() as unknown as RuntimeSettings
       const channel = resolveChannel(settings, 'image')
-      if (channel === undefined) throw new Error('generate_image 未配置图片渠道，请在设置页添加渠道。')
+      if (channel === undefined) throw new Error('make_image 未配置图片渠道，请在设置页添加渠道。')
       const credential = await ctx.credentials.resolve(channelCredentialRef(channel.id))
-      if (credential === undefined || credential.value.length === 0) throw new Error(`generate_image 渠道「${channel.name}」未配置 API Key。`)
+      if (credential === undefined || credential.value.length === 0) throw new Error(`make_image 渠道「${channel.name}」未配置 API Key。`)
       const baseURL = channel.baseURL.replace(/\/+$/, '')
       const model = channel.model
       const size = args.size ?? '1024x1024'

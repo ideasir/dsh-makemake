@@ -1,5 +1,5 @@
 /** Make Make — multi-provider image/video generation UI for DeepSeek Harness. */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
@@ -32,8 +32,10 @@ interface SettingsFace {
   pluginSettings: PluginSettingsClient
 }
 type CardProps = PropsRuntime<'settings.plugin.item'> & InjectFace<SettingsFace>
+type ImageCardProps = PropsRuntime<'tool.call.toolview'> & InjectFace<{}>
 
 const CREATION_NAMESPACE = 'creation'
+const IMAGE_ROUTE = '/plugins/dsh-makemake/image'
 
 function credentialRef(channelId: string): string {
   return `MAKEMAKE_CHANNEL_${channelId.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`
@@ -143,6 +145,13 @@ export function apply(ctx: Context): void {
     order: 90,
     inject: (): SettingsFace => ({ scope, pluginSettings }),
   }, MakemakePluginCard))
+
+  // 注册 toolview 插槽让图片显示
+  ctx.slots.inject('tool.call.toolview' as any, () => (ctx.slots.register as any)({
+    name: 'tool.call.toolview',
+    key: 'make_image',
+    inject: () => ({}),
+  }, ImageResultCard))
 
   // Printer toggle
   ctx.slots.inject('conversation.input.right' as any, () => (ctx.slots.register as any)({
@@ -330,7 +339,7 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
         </button>
         <div>
           <div className="dsh-mm-master-label">{enabled ? 'Make Make 已开启' : 'Make Make 已关闭'}</div>
-          <div className="dsh-mm-master-note">{enabled ? 'AI 可以调用 generate_image 工具生成图片' : '关闭后 AI 无法调用图像生成工具'}</div>
+          <div className="dsh-mm-master-note">{enabled ? 'AI 可以调用 make_image 工具生成图片' : '关闭后 AI 无法调用图像生成工具'}</div>
         </div>
       </div>
 
@@ -494,3 +503,141 @@ const LucideImage = ({ size }: { size: number }) => (
 const LucideVideo = ({ size }: { size: number }) => (
   <L size={size} d={[<rect key="r" x="2" y="4" width="14" height="16" rx="2" ry="2" />, <path key="p1" d="m16 8 4-2.5v13L16 16" />]} />
 )
+
+// ─── Image result card ──────────────────────────────────────────────────────
+interface ContentBlock { type: string; text?: string; attachment?: { attachmentId: string; previewUrl?: string } }
+const MODAL_ANIM = `
+.dsh-mm-modal{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.88);opacity:0;animation:dsh-mm-fadein .22s ease-out forwards}
+.dsh-mm-modal.closing{animation:dsh-mm-fadeout .18s ease-in forwards}
+.dsh-mm-modal-img{display:block;position:absolute;user-select:none;-webkit-user-drag:none;cursor:grab}
+.dsh-mm-modal-img.dragging{cursor:grabbing}
+.dsh-mm-modal-close{position:fixed;top:16px;right:16px;width:36px;height:36px;border-radius:999px;border:none;cursor:pointer;background:rgba(255,255,255,0.15);color:#fff;font-size:18px;line-height:1;display:grid;place-items:center;transition:background .15s;z-index:10}
+.dsh-mm-modal-close:hover{background:rgba(255,255,255,0.3)}
+.dsh-mm-modal-hint{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.65);color:#fff;font-size:12px;padding:5px 14px;border-radius:999px;pointer-events:none;white-space:nowrap;backdrop-filter:blur(6px);z-index:10}
+@keyframes dsh-mm-fadein{from{opacity:0}to{opacity:1}}
+@keyframes dsh-mm-fadeout{from{opacity:1}to{opacity:0}}
+`
+function ImageResultCard(props: ImageCardProps) {
+  const block = props.block as { content?: ContentBlock[]; isError?: boolean; error?: { code?: string; message?: string } }
+  const [modalUrl, setModalUrl] = useState<string | null>(null)
+  const [zoom, setZoom] = useState(1)
+  const [offset, setOffset] = useState({ x: 0, y: 0 })
+  const [dragging, setDragging] = useState(false)
+  const [closing, setClosing] = useState(false)
+  const dragRef = useRef<{ startX: number; startY: number; startOffset: { x: number; y: number } } | null>(null)
+  const imgRef = useRef<HTMLImageElement>(null)
+  const containerRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 })
+
+  const openModal = (url: string) => { setModalUrl(url); setZoom(1); setOffset({ x: 0, y: 0 }); setClosing(false) }
+  const closeModal = () => { setClosing(true); setTimeout(() => { setModalUrl(null); setClosing(false) }, 160) }
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault()
+    setZoom(z => Math.max(0.25, Math.min(10, z - e.deltaY * 0.003)))
+  }
+  const onMouseDown = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).tagName === 'BUTTON') return
+    dragRef.current = { startX: e.clientX, startY: e.clientY, startOffset: { ...offset } }
+    setDragging(true)
+  }
+  // Position image: center on screen, fit within viewport
+  useEffect(() => {
+    if (!imgRef.current) return
+    const img = imgRef.current
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const naturalW = img.naturalWidth
+    const naturalH = img.naturalHeight
+    const scale = Math.min(vw / naturalW, vh / naturalH, 1)
+    const w = naturalW * scale
+    const h = naturalH * scale
+    containerRef.current = { w, h }
+    img.style.left = `${(vw - w) / 2}px`
+    img.style.top = `${(vh - h) / 2}px`
+    img.style.width = `${w}px`
+    img.style.height = `${h}px`
+    img.style.transform = `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`
+    img.style.transformOrigin = 'center center'
+  }, [modalUrl, zoom])
+  // Update position on zoom/offset change
+  useEffect(() => {
+    if (!imgRef.current) return
+    const { w, h } = containerRef.current
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    imgRef.current.style.left = `${(vw - w) / 2 + offset.x}px`
+    imgRef.current.style.top = `${(vh - h) / 2 + offset.y}px`
+    imgRef.current.style.transform = `scale(${zoom})`
+    imgRef.current.style.transformOrigin = 'center center'
+  }, [zoom, offset])
+  const onMouseMove = (e: MouseEvent) => {
+    if (!dragRef.current) return
+    setOffset({
+      x: dragRef.current.startOffset.x + (e.clientX - dragRef.current.startX),
+      y: dragRef.current.startOffset.y + (e.clientY - dragRef.current.startY),
+    })
+  }
+  const onMouseUp = () => {
+    dragRef.current = null
+    setDragging(false)
+  }
+  useEffect(() => {
+    if (!modalUrl) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); closeModal() } }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+  }, [modalUrl, closing])
+  useEffect(() => {
+    if (!modalUrl) return
+    const style = document.createElement('style')
+    style.dataset.plugin = 'dsh-makemake-modal'
+    style.textContent = MODAL_ANIM
+    document.head.appendChild(style)
+    return () => { style.remove() }
+  }, [modalUrl])
+  if (!block?.content) return null
+  const imageBlocks = block.content.filter((b: any) => b.type === 'image' && b.attachment)
+  const textBlocks = block.content.filter((b: any) => b.type === 'text' && b.text)
+  if (block.isError) {
+    return <div style={{ padding: '8px 12px', fontSize: 13, color: 'var(--dsw-alias-state-error-primary)', background: 'var(--dsw-alias-bg-layer-3)', borderRadius: 8, marginTop: 4 }}>图片生成失败：{block.error?.message ?? '未知错误'}</div>
+  }
+
+  if (imageBlocks.length > 0) {
+    return <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+      {imageBlocks.map((b: any, i: number) => {
+        const att = b.attachment
+        const url = `${window.location.origin}/plugins/dsh-makemake/image?attachmentId=${att?.attachmentId}`
+        return (
+          <div key={i} style={{ cursor: 'zoom-in', position: 'relative', display: 'inline-block', alignSelf: 'flex-start', lineHeight: 0 }}
+            onClick={() => openModal(url)}>
+            <img src={url} alt="generated"
+              style={{ maxWidth: 350, maxHeight: 350, borderRadius: 8, border: '1px solid var(--dsw-alias-border-l2)', display: 'block', objectFit: 'contain' }}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+            />
+          </div>
+        )
+      })}
+      {textBlocks.length > 0 && <p style={{ margin: 0, fontSize: 13, color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1.5 }}>{textBlocks.map((b: any) => b.text).join('')}</p>}
+      {modalUrl && (
+        <div className={`dsh-mm-modal ${dragging ? 'dragging' : ''} ${closing ? 'closing' : ''}`} onClick={closeModal}>
+          <button className="dsh-mm-modal-close" onClick={closeModal}>✕</button>
+          <img ref={imgRef} src={modalUrl} alt="大图"
+            className={`dsh-mm-modal-img ${dragging ? 'dragging' : ''}`}
+            onWheel={handleWheel}
+            onMouseDown={onMouseDown}
+          />
+          <div className="dsh-mm-modal-hint">{Math.round(zoom * 100)}% · 滚轮缩放 · 拖拽移动 · ESC 关闭</div>
+        </div>
+      )}
+    </div>
+  }
+  if (textBlocks.length > 0) {
+    return <div style={{ padding: '8px 12px', fontSize: 13, color: 'var(--dsw-alias-label-primary)', lineHeight: 1.5, marginTop: 4 }}>{textBlocks.map((b: any) => b.text).join('')}</div>
+  }
+  return null
+}
