@@ -338,12 +338,17 @@ export function apply(ctx: Context, config: Config = {}): void {
       for (const ch of sorted) {
         const cred = await ctx.credentials.resolve(channelCredentialRef(ch.id))
         if (!cred?.value) { lastErr.push(`渠道「${ch.name}」未配置 API Key`); continue }
+        const pool = getKeyPool(ch.id, cred.value)
+        const sk = pool.next()
+        if (!sk) { lastErr.push(`渠道「${ch.name}」所有 Key 都在冷却中`); continue }
         const baseURL = ch.baseURL.replace(/\/+$/, '')
+        // 兼容带 /v1 和不带 /v1 的 baseURL
+        const videoBase = baseURL.endsWith('/v1') ? baseURL : `${baseURL}/v1`
         try {
           // 提交视频生成任务
-          const submitResp = await fetch(`${baseURL}/videos`, {
+          const submitResp = await fetch(`${videoBase}/videos`, {
             method: 'POST', redirect: 'error', signal: exec.signal,
-            headers: { authorization: `Bearer ${cred.value}`, 'content-type': 'application/json' },
+            headers: { authorization: `Bearer ${sk}`, 'content-type': 'application/json' },
             body: JSON.stringify({ model: ch.model, prompt: args.prompt, duration: parseInt(duration, 10) || 5, n: 1 }),
           })
           if (!submitResp.ok) {
@@ -356,13 +361,13 @@ export function apply(ctx: Context, config: Config = {}): void {
           if (!taskId) throw new Error('API 返回了空任务 ID')
 
           // 轮询任务状态（最多等 120 秒）
-          const pollUrl = `${baseURL}/videos/${taskId}`
+          const pollUrl = `${videoBase}/videos/${taskId}`
           let videoTask
           for (let i = 0; i < 60; i++) {
             await new Promise(r => setTimeout(r, 2000))
             const pollResp = await fetch(pollUrl, {
               redirect: 'error', signal: exec.signal,
-              headers: { authorization: `Bearer ${cred.value}` },
+              headers: { authorization: `Bearer ${sk}` },
             })
             if (!pollResp.ok) {
               const text = (await pollResp.text()).slice(0, 300)
