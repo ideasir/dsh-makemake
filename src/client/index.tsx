@@ -31,12 +31,9 @@ interface SettingsFace {
   scope: SettingsScope<MakemakeSettings>
   pluginSettings: PluginSettingsClient
 }
-interface ImageCardFace {}
 type CardProps = PropsRuntime<'settings.plugin.item'> & InjectFace<SettingsFace>
-type ImageCardProps = PropsRuntime<'tool.call.toolview'> & InjectFace<ImageCardFace>
 
 const CREATION_NAMESPACE = 'creation'
-const IMAGE_ROUTE = '/plugins/dsh-makemake/image'
 
 function credentialRef(channelId: string): string {
   return `MAKEMAKE_CHANNEL_${channelId.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`
@@ -146,13 +143,6 @@ export function apply(ctx: Context): void {
     order: 90,
     inject: (): SettingsFace => ({ scope, pluginSettings }),
   }, MakemakePluginCard))
-
-  // 注册 toolview 插槽让图片显示
-  ctx.slots.inject('tool.call.toolview' as any, () => (ctx.slots.register as any)({
-    name: 'tool.call.toolview',
-    key: 'generate_image',
-    inject: () => ({}),
-  }, ImageResultCard))
 
   // Printer toggle
   ctx.slots.inject('conversation.input.right' as any, () => (ctx.slots.register as any)({
@@ -504,27 +494,3 @@ const LucideImage = ({ size }: { size: number }) => (
 const LucideVideo = ({ size }: { size: number }) => (
   <L size={size} d={[<rect key="r" x="2" y="4" width="14" height="16" rx="2" ry="2" />, <path key="p1" d="m16 8 4-2.5v13L16 16" />]} />
 )
-
-// ─── Image result card ──────────────────────────────────────────────────────
-interface ContentBlock { type: string; text?: string; attachment?: { attachmentId: string; previewUrl?: string } }
-function ImageResultCard(props: ImageCardProps) {
-  const block = props.block as { content?: ContentBlock[]; isError?: boolean; error?: { code?: string; message?: string } }
-  if (!block?.content) return null
-  const imageBlocks = block.content.filter((b: any) => b.type === 'image' && b.attachment)
-  const textBlocks = block.content.filter((b: any) => b.type === 'text' && b.text)
-  if (block.isError) {
-    return <div style={{ padding: '8px 12px', fontSize: 13, color: 'var(--dsw-alias-state-error-primary)', background: 'var(--dsw-alias-bg-layer-3)', borderRadius: 8, marginTop: 4 }}>图片生成失败：{block.error?.message ?? '未知错误'}</div>
-  }
-  if (imageBlocks.length > 0) {
-    return <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
-      {imageBlocks.map((b: any, i: number) => (
-        <img key={i} src={`${window.location.origin}/plugins/dsh-makemake/image?attachmentId=${b.attachment?.attachmentId}`} alt="generated" style={{ maxWidth: '100%', maxHeight: 512, borderRadius: 8, border: '1px solid var(--dsw-alias-border-l2)' }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-      ))}
-      {textBlocks.length > 0 && <p style={{ margin: 0, fontSize: 13, color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1.5 }}>{textBlocks.map((b: any) => b.text).join('')}</p>}
-    </div>
-  }
-  if (textBlocks.length > 0) {
-    return <div style={{ padding: '8px 12px', fontSize: 13, color: 'var(--dsw-alias-label-primary)', lineHeight: 1.5, marginTop: 4 }}>{textBlocks.map((b: any) => b.text).join('')}</div>
-  }
-  return null
-}
