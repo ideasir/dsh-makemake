@@ -21,7 +21,7 @@ export { IMAGE_ROUTE } from './shared.js'
 /** Cordis plugin name. */
 export const name = 'dsh-makemake'
 /** Host services required by the Bundle. */
-export const inject = ['tools', 'attachments', 'credentials', 'webServer', 'settings', 'systemPrompt']
+export const inject = ['tools', 'attachments', 'credentials', 'webServer', 'settings', 'commands', 'systemPrompt']
 
 interface Channel {
   id: string
@@ -106,6 +106,14 @@ export function apply(ctx: Context, config: Config = {}): void {
     })
     return () => {}
   }, 'dsh-makemake: image route')
+
+  // 注册命令让 DSH 识别 /make 前缀（命令名必须为英文小写）
+  ctx.effect(() => {
+    const commands = ctx.get('commands') as { register: (def: { name: string; description: string; handler: () => { kind: string } }) => void } | undefined
+    if (!commands) return
+    commands.register({ name: 'make-image', description: 'Generate an image', handler: () => ({ kind: 'success' as const }) })
+    commands.register({ name: 'make-video', description: 'Generate a video', handler: () => ({ kind: 'success' as const }) })
+  }, 'dsh-makemake: commands')
 
   // 注册系统提示词，让模型知道 makemake 工具
   ctx.systemPrompt.section({
