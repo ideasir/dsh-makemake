@@ -106,6 +106,15 @@ export function apply(ctx: Context, config: Config = {}): void {
       const baseURL = channel.baseURL.replace(/\/+$/, '')
       const model = channel.model
       const size = args.size ?? '1024x1024'
+      // 常见尺寸别名 → 标准格式
+      const sizeAlias: Record<string, string> = {
+        '1K': '1024x1024', '2K': '2048x2048', '4K': '3840x2160',
+        'square': '1024x1024', 'portrait': '768x1024', 'landscape': '1024x768',
+      }
+      const sizeRaw = sizeAlias[size.toLowerCase()] ?? size
+      const sizeMatch = sizeRaw.match(/^(\d+)x(\d+)$/)
+      if (!sizeMatch) throw new Error(`图片尺寸格式错误，应为 WIDTHxHEIGHT（如 "1024x1024"），收到: ${size}`)
+      const resolvedSize = sizeMatch[1] + 'x' + sizeMatch[2]
       // 将客户端传入的图片URL（可能含SSH隧道端口）转换为服务端直连地址
       const dshUrl = new URL(`http://127.0.0.1:3080`)
       const normalizeImageUrl = (url: string) => url.replace(/^https?:\/\/[^/]+/, dshUrl.origin)
@@ -135,7 +144,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         form.append('model', model)
         form.append('prompt', args.prompt)
         form.append('n', '1')
-        form.append('size', size)
+        form.append('size', resolvedSize)
         form.append('image', new Blob([refBytes], { type: refType }), 'reference.png')
         response = await fetch(`${baseURL}/images/edits`, {
           method: 'POST', redirect: 'error', signal: exec.signal,
@@ -147,14 +156,14 @@ export function apply(ctx: Context, config: Config = {}): void {
           response = await fetch(`${baseURL}/images/generations`, {
             method: 'POST', redirect: 'error', signal: exec.signal,
             headers: { authorization: `Bearer ${credential.value}`, 'content-type': 'application/json' },
-            body: JSON.stringify({ model, prompt: `[参考图片: ${srcImage}] ${args.prompt}`, size, n: 1 }),
+            body: JSON.stringify({ model, prompt: `[参考图片: ${srcImage}] ${args.prompt}`, size: resolvedSize, n: 1 }),
           })
         }
       } else {
         response = await fetch(`${baseURL}/images/generations`, {
           method: 'POST', redirect: 'error', signal: exec.signal,
           headers: { authorization: `Bearer ${credential.value}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ model, prompt: args.prompt, size, n: 1 }),
+          body: JSON.stringify({ model, prompt: args.prompt, size: resolvedSize, n: 1 }),
         })
       }
       if (!response.ok) {
