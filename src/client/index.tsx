@@ -80,7 +80,6 @@ export function apply(ctx: Context): void {
   const { api } = ctx.get('connection') as ConnectionHandle
   const scope = ctx.settingsScope.bind<MakemakeSettings>({ namespace: CREATION_NAMESPACE as never })
 
-  // Build pluginSettings client (use DSH core connection API, not looklook remote)
   const pluginSettingsListeners = new Set<() => void>()
   const pluginSettings: PluginSettingsClient = {
     subscribe: (listener) => {
@@ -90,7 +89,6 @@ export function apply(ctx: Context): void {
     describe: async () => {
       try {
         const res: any = await api.settings.describe({})
-        // DSH returns { rpcId, result: { ok, value } }
         if (!res?.result?.ok) return { ok: false, error: res?.result?.error?.message ?? '读取插件设置失败' }
         return { ok: true, namespaces: res?.result?.value?.namespaces ?? [] }
       } catch (e) {
@@ -146,12 +144,14 @@ export function apply(ctx: Context): void {
     inject: (): SettingsFace => ({ scope, pluginSettings }),
   }, MakemakePluginCard))
 
-  // 注册 toolview 插槽让图片显示
-  ctx.slots.inject('tool.call.toolview' as any, () => (ctx.slots.register as any)({
-    name: 'tool.call.toolview',
-    key: 'make_image',
-    inject: () => ({}),
-  }, ImageResultCard))
+  // toolview slots (兼容旧会话)
+  ;(['makemake_image', 'make_image', 'generate_image'] as const).forEach(key => {
+    ctx.slots.inject('tool.call.toolview' as any, () => (ctx.slots.register as any)({
+      name: 'tool.call.toolview',
+      key,
+      inject: () => ({}),
+    }, ImageResultCard))
+  })
 
   // Printer toggle
   ctx.slots.inject('conversation.input.right' as any, () => (ctx.slots.register as any)({
@@ -161,8 +161,6 @@ export function apply(ctx: Context): void {
     inject: (sessionId: string): { scope: SettingsScope<MakemakeSettings> } => ({ scope }),
   }, PrinterToggle))
 }
-
-// ─── Plugin Card ──────────────────────────────────────────────────────────
 
 function MakemakePluginCard(props: CardProps) {
   const [open, setOpen] = useState(false)
@@ -179,7 +177,7 @@ function MakemakePluginCard(props: CardProps) {
             <span className="dsh-mm-title">Make Make</span>
             {version && <span className="dsh-mm-version-badge">{version}</span>}
           </div>
-          <span className="dsh-mm-desc">支持生成图像和视频的插件。AI 可以为你画图、生成视频，后续支持文档生成。</span>
+          <span className="dsh-mm-desc">支持生成图像和视频的插件。AI 可以为你画图、生成视频。</span>
         </span>
         <span className="dsh-mm-btns">
           <a className="dsh-mm-btn-link" href="https://github.com/ideasir/dsh-makemake" target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} title="打开 GitHub 仓库">ideasir</a>
@@ -213,12 +211,9 @@ function MakemakePluginCard(props: CardProps) {
   )
 }
 
-// ─── Plugin body ───────────────────────────────────────────────────────────
-
 function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSettings>; pluginSettings: PluginSettingsClient }) {
   const [enabled, setEnabled] = useState(true)
   const [openPanel, setOpenPanel] = useState<'image' | 'video' | null>(null)
-  // Edit form state
   const [editing, setEditing] = useState<{ type: 'image' | 'video'; id: string } | null>(null)
   const [chName, setChName] = useState('')
   const [chBaseURL, setChBaseURL] = useState('')
@@ -263,7 +258,6 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
     setChModel(ch?.model ?? '')
     setChKey('')
     setKeyConfigured(false)
-    // Check if key is configured for existing channel
     if (ch) {
       void pluginSettings.describeCredentials([credentialRef(ch.id)]).then(res => {
         if (res.ok) setKeyConfigured(res.credentials[credentialRef(ch.id)]?.configured ?? false)
@@ -277,19 +271,16 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
     const key = editing.type === 'image' ? 'imageChannels' : 'videoChannels'
     const current = [...(scope.getSnapshot().value?.[key] ?? [])]
     const isNew = editing.id.startsWith('new-')
-
     try {
       if (isNew) {
         const newId = `ch-${Date.now()}`
         const newCh: Channel = { id: newId, name: chName || chModel, baseURL: chBaseURL, model: chModel }
-        // Save API key to credentials
         if (chKey.trim()) {
           const cred = await pluginSettings.setCredential(credentialRef(newId), chKey.trim())
           if (!cred.ok) throw new Error(cred.error)
         }
         await scope.set(key, [...current, newCh])
       } else {
-        // Update existing
         if (chKey.trim()) {
           const cred = await pluginSettings.setCredential(credentialRef(editing.id), chKey.trim())
           if (!cred.ok) throw new Error(cred.error)
@@ -339,85 +330,118 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
         </button>
         <div>
           <div className="dsh-mm-master-label">{enabled ? 'Make Make 已开启' : 'Make Make 已关闭'}</div>
-          <div className="dsh-mm-master-note">{enabled ? 'AI 可以调用 make_image 工具生成图片' : '关闭后 AI 无法调用图像生成工具'}</div>
+          <div className="dsh-mm-master-note">{enabled ? 'AI 可以调用 makemake_image 工具生成图片' : '关闭后 AI 无法调用图像生成工具'}</div>
         </div>
       </div>
 
       <div className="dsh-mm-buttons">
-        <BigButton icon={<LucideImage size={22} />} label="出图模型" configured={true}
+        <BigButton icon={<LucideImage size={22} />} label="出图模型" configured={!!(channels as any[]).length}
           active={openPanel === 'image'} onClick={() => setOpenPanel(p => p === 'image' ? null : 'image')} />
-        <BigButton icon={<LucideVideo size={22} />} label="视频模型" tag="待开发" configured={false}
+        <BigButton icon={<LucideVideo size={22} />} label="出视频模型" configured={!!(channels as any[]).length}
           active={openPanel === 'video'} onClick={() => setOpenPanel(p => p === 'video' ? null : 'video')} />
       </div>
 
       {openPanel === 'image' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {(channels as any[]).length === 0 && !editing && (
-            <div style={{ fontSize: 13, color: 'var(--dsw-alias-label-tertiary)', padding: '8px 0' }}>暂无渠道，点击下方按钮添加</div>
-          )}
-          {(channels as any[]).map((ch: any) => (
-            <div key={ch.id} style={{
-              display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderRadius: 8,
-              border: selectedId === ch.id ? '2px solid var(--dsw-alias-brand-primary)' : '1px solid var(--dsw-alias-border-l2)',
-              background: selectedId === ch.id ? 'color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent)' : 'transparent',
-            }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 500 }}>{ch.name}</div>
-                <div style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' }}>{ch.model}</div>
-              </div>
-              <button type="button" onClick={() => { void scope.set('selectedImageChannel', ch.id) }}
-                style={{ background: 'none', border: 'none', fontSize: 12, cursor: 'pointer', color: selectedId === ch.id ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-label-tertiary)' }}>
-                {selectedId === ch.id ? '✓' : '○'}
-              </button>
-              <button type="button" onClick={() => startEdit('image', ch)}
-                style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer', fontSize: 14, color: 'var(--dsw-alias-label-tertiary)' }}>✏️</button>
-              <button type="button" onClick={() => { void deleteChannel('image', ch.id) }}
-                style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer', fontSize: 14, color: 'var(--dsw-alias-state-error-primary)' }}>🗑</button>
-            </div>
-          ))}
-          <button type="button" onClick={() => startEdit('image')} style={{
-            fontSize: 12, color: 'var(--dsw-alias-brand-primary)', background: 'none',
-            border: '1px dashed var(--dsw-alias-border-l2)', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', alignSelf: 'flex-start',
-          }}>+ 添加渠道</button>
-
-          {editing && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12, background: 'var(--dsw-alias-bg-layer-2)', borderRadius: 8 }}>
-              <div style={fieldStyle}>
-                <label style={labelStyle}>渠道名称</label>
-                <input style={inputStyle} value={chName} onChange={e => setChName(e.target.value)} placeholder="如：精品出图" />
-              </div>
-              <div style={fieldStyle}>
-                <label style={labelStyle}>接口地址</label>
-                <input style={inputStyle} value={chBaseURL} onChange={e => setChBaseURL(e.target.value)} placeholder="https://api.openai.com/v1" />
-              </div>
-              <div style={fieldStyle}>
-                <label style={labelStyle}>模型名</label>
-                <input style={inputStyle} value={chModel} onChange={e => setChModel(e.target.value)} placeholder="gpt-image-2" />
-              </div>
-              <div style={fieldStyle}>
-                <label style={labelStyle}>API Key</label>
-                <input style={inputStyle} type="password" autoComplete="off" value={chKey} onChange={e => setChKey(e.target.value)}
-                  placeholder={keyConfigured ? '留空保持已配置的 Key' : '输入 API Key'} />
-                {keyConfigured && <span style={{ fontSize: 11, color: 'var(--dsw-alias-state-success-primary)' }}>✓ Key 已配置</span>}
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center' }}>
-                {saveMsg && (
-                  <span style={{ fontSize: 12, color: saveMsg.startsWith('✓') ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>
-                    {saveMsg}
-                  </span>
-                )}
-                <button onClick={() => setEditing(null)} style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent', cursor: 'pointer' }}>取消</button>
-                <button onClick={saveChannel} style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6, border: 'none', background: 'var(--dsw-alias-state-success-primary)', color: '#fff', cursor: 'pointer' }}>保存</button>
-              </div>
-            </div>
-          )}
-        </div>
+        <VideoChannelPanel
+          type="image"
+          channels={channels as any[]}
+          selectedId={selectedId}
+          editing={editing}
+          scope={scope}
+          chName={chName} chBaseURL={chBaseURL} chModel={chModel} chKey={chKey} keyConfigured={keyConfigured}
+          inputStyle={inputStyle} fieldStyle={fieldStyle} labelStyle={labelStyle}
+          startEdit={startEdit} saveChannel={saveChannel} deleteChannel={deleteChannel}
+          setChName={setChName} setChBaseURL={setChBaseURL} setChModel={setChModel} setChKey={setChKey}
+          setKeyConfigured={setKeyConfigured} setEditing={setEditing} saveMsg={saveMsg}
+        />
+      )}
+      {openPanel === 'video' && (
+        <VideoChannelPanel
+          type="video"
+          channels={channels as any[]}
+          selectedId={selectedId}
+          editing={editing}
+          scope={scope}
+          chName={chName} chBaseURL={chBaseURL} chModel={chModel} chKey={chKey} keyConfigured={keyConfigured}
+          inputStyle={inputStyle} fieldStyle={fieldStyle} labelStyle={labelStyle}
+          startEdit={startEdit} saveChannel={saveChannel} deleteChannel={deleteChannel}
+          setChName={setChName} setChBaseURL={setChBaseURL} setChModel={setChModel} setChKey={setChKey}
+          setKeyConfigured={setKeyConfigured} setEditing={setEditing} saveMsg={saveMsg}
+        />
       )}
     </>
   )
 }
 
-// ─── Big button ────────────────────────────────────────────────────────────
+function VideoChannelPanel({
+  type, channels, selectedId, editing, scope, chName, chBaseURL, chModel, chKey, keyConfigured,
+  inputStyle, fieldStyle, labelStyle, startEdit, saveChannel, deleteChannel,
+  setChName, setChBaseURL, setChModel, setChKey, setKeyConfigured, setEditing, saveMsg,
+}: any) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {channels.length === 0 && !editing && (
+        <div style={{ fontSize: 13, color: 'var(--dsw-alias-label-tertiary)', padding: '8px 0' }}>暂无渠道，点击下方按钮添加</div>
+      )}
+      {channels.map((ch: any) => (
+        <div key={ch.id} style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderRadius: 8,
+          border: selectedId === ch.id ? '2px solid var(--dsw-alias-brand-primary)' : '1px solid var(--dsw-alias-border-l2)',
+          background: selectedId === ch.id ? 'color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent)' : 'transparent',
+        }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 500 }}>{ch.name}</div>
+            <div style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' }}>{ch.model}</div>
+          </div>
+          <button type="button" onClick={() => { void scope.set(selectedId === ch.id ? '' : ch.id) }}
+            style={{ background: 'none', border: 'none', fontSize: 12, cursor: 'pointer', color: selectedId === ch.id ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-label-tertiary)' }}>
+            {selectedId === ch.id ? '✓' : '○'}
+          </button>
+          <button type="button" onClick={() => startEdit(type, ch)}
+            style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer', fontSize: 14, color: 'var(--dsw-alias-label-tertiary)' }}>✏️</button>
+          <button type="button" onClick={() => { void deleteChannel(type, ch.id) }}
+            style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer', fontSize: 14, color: 'var(--dsw-alias-state-error-primary)' }}>🗑</button>
+        </div>
+      ))}
+      <button type="button" onClick={() => startEdit(type)} style={{
+        fontSize: 12, color: 'var(--dsw-alias-brand-primary)', background: 'none',
+        border: '1px dashed var(--dsw-alias-border-l2)', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', alignSelf: 'flex-start',
+      }}>+ 添加渠道</button>
+
+      {editing && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12, background: 'var(--dsw-alias-bg-layer-2)', borderRadius: 8 }}>
+          <div style={fieldStyle}>
+            <label style={labelStyle}>渠道名称</label>
+            <input style={inputStyle} value={chName} onChange={e => setChName(e.target.value)} placeholder={type === 'image' ? '如：精品出图' : '如：视频生成'} />
+          </div>
+          <div style={fieldStyle}>
+            <label style={labelStyle}>接口地址</label>
+            <input style={inputStyle} value={chBaseURL} onChange={e => setChBaseURL(e.target.value)} placeholder={type === 'image' ? 'https://api.openai.com/v1' : 'https://api.example.com/v1'} />
+          </div>
+          <div style={fieldStyle}>
+            <label style={labelStyle}>模型名</label>
+            <input style={inputStyle} value={chModel} onChange={e => setChModel(e.target.value)} placeholder={type === 'image' ? 'gpt-image-2' : 'sora'} />
+          </div>
+          <div style={fieldStyle}>
+            <label style={labelStyle}>API Key</label>
+            <input style={inputStyle} type="password" autoComplete="off" value={chKey} onChange={e => setChKey(e.target.value)}
+              placeholder={keyConfigured ? '留空保持已配置的 Key' : '输入 API Key'} />
+            {keyConfigured && <span style={{ fontSize: 11, color: 'var(--dsw-alias-state-success-primary)' }}>✓ Key 已配置</span>}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center' }}>
+            {saveMsg && (
+              <span style={{ fontSize: 12, color: saveMsg.startsWith('✓') ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>
+                {saveMsg}
+              </span>
+            )}
+            <button onClick={() => setEditing(null)} style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent', cursor: 'pointer' }}>取消</button>
+            <button onClick={saveChannel} style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6, border: 'none', background: 'var(--dsw-alias-state-success-primary)', color: '#fff', cursor: 'pointer' }}>保存</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function BigButton({ icon, label, tag, configured, active, onClick }: {
   icon: ReactNode; label: string; tag?: string; configured: boolean; active: boolean; onClick: () => void
@@ -438,16 +462,8 @@ function BigButton({ icon, label, tag, configured, active, onClick }: {
   )
 }
 
-// ─── Printer toggle in input area ────────────────────────────────────────
-// Behavior matches LookLook's eye icon:
-// - Plugin disabled in settings → button disappears entirely
-// - Button visible → click toggles per-session on/off (icon dims)
-// - Permanent on/off controlled by settings page only
-//
 function PrinterToggle({ scope }: { scope: SettingsScope<MakemakeSettings> }) {
-  // visible: controlled by settings page master switch (enabled field)
   const [visible, setVisible] = useState(true)
-  // active: local temporary toggle (click to dim/brighten, NOT persisted)
   const [active, setActive] = useState(true)
 
   useEffect(() => {
@@ -455,7 +471,6 @@ function PrinterToggle({ scope }: { scope: SettingsScope<MakemakeSettings> }) {
       try {
         const v = scope.getSnapshot().value
         setVisible(v?.enabled !== false)
-        // Sync active with master switch on load (start fresh each page)
         setActive(v?.enabled !== false)
       } catch { /* ignore */ }
     }
@@ -463,14 +478,9 @@ function PrinterToggle({ scope }: { scope: SettingsScope<MakemakeSettings> }) {
     return scope.subscribe(loadState)
   }, [])
 
-  // Hidden when plugin is disabled in settings (same as eye icon)
   if (!visible) return null
 
-  const toggle = () => {
-    // Local toggle only - does NOT touch settings
-    // This is a temporary per-session toggle, like LookLook's eye
-    setActive(v => !v)
-  }
+  const toggle = () => setActive(v => !v)
 
   return (
     <button type="button" onClick={toggle}
@@ -490,8 +500,6 @@ function PrinterToggle({ scope }: { scope: SettingsScope<MakemakeSettings> }) {
   )
 }
 
-// ─── Lucide icons ──────────────────────────────────────────────────────────
-
 function L({ d, size }: { d: ReactNode; size: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none"><g stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{d}</g></svg>
 }
@@ -504,8 +512,7 @@ const LucideVideo = ({ size }: { size: number }) => (
   <L size={size} d={[<rect key="r" x="2" y="4" width="14" height="16" rx="2" ry="2" />, <path key="p1" d="m16 8 4-2.5v13L16 16" />]} />
 )
 
-// ─── Image result card ──────────────────────────────────────────────────────
-interface ContentBlock { type: string; text?: string; attachment?: { attachmentId: string; previewUrl?: string } }
+// ─── Modal anim ──────────────────────────────────────────────────────────
 const MODAL_ANIM = `
 .dsh-mm-modal{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.88);opacity:0;animation:dsh-mm-fadein .22s ease-out forwards}
 .dsh-mm-modal.closing{animation:dsh-mm-fadeout .18s ease-in forwards}
@@ -517,6 +524,9 @@ const MODAL_ANIM = `
 @keyframes dsh-mm-fadein{from{opacity:0}to{opacity:1}}
 @keyframes dsh-mm-fadeout{from{opacity:1}to{opacity:0}}
 `
+
+// ─── Image result card ──────────────────────────────────────────────────────
+interface ContentBlock { type: string; text?: string; attachment?: { attachmentId: string; previewUrl?: string } }
 function ImageResultCard(props: ImageCardProps) {
   const block = props.block as { content?: ContentBlock[]; isError?: boolean; error?: { code?: string; message?: string } }
   const [modalUrl, setModalUrl] = useState<string | null>(null)
@@ -539,36 +549,6 @@ function ImageResultCard(props: ImageCardProps) {
     dragRef.current = { startX: e.clientX, startY: e.clientY, startOffset: { ...offset } }
     setDragging(true)
   }
-  // Position image: center on screen, fit within viewport
-  useEffect(() => {
-    if (!imgRef.current) return
-    const img = imgRef.current
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    const naturalW = img.naturalWidth
-    const naturalH = img.naturalHeight
-    const scale = Math.min(vw / naturalW, vh / naturalH, 1)
-    const w = naturalW * scale
-    const h = naturalH * scale
-    containerRef.current = { w, h }
-    img.style.left = `${(vw - w) / 2}px`
-    img.style.top = `${(vh - h) / 2}px`
-    img.style.width = `${w}px`
-    img.style.height = `${h}px`
-    img.style.transform = `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`
-    img.style.transformOrigin = 'center center'
-  }, [modalUrl, zoom])
-  // Update position on zoom/offset change
-  useEffect(() => {
-    if (!imgRef.current) return
-    const { w, h } = containerRef.current
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    imgRef.current.style.left = `${(vw - w) / 2 + offset.x}px`
-    imgRef.current.style.top = `${(vh - h) / 2 + offset.y}px`
-    imgRef.current.style.transform = `scale(${zoom})`
-    imgRef.current.style.transformOrigin = 'center center'
-  }, [zoom, offset])
   const onMouseMove = (e: MouseEvent) => {
     if (!dragRef.current) return
     setOffset({
@@ -600,6 +580,34 @@ function ImageResultCard(props: ImageCardProps) {
     document.head.appendChild(style)
     return () => { style.remove() }
   }, [modalUrl])
+  useEffect(() => {
+    if (!imgRef.current) return
+    const img = imgRef.current
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const naturalW = img.naturalWidth
+    const naturalH = img.naturalHeight
+    const scale = Math.min(vw / naturalW, vh / naturalH, 1)
+    const w = naturalW * scale
+    const h = naturalH * scale
+    containerRef.current = { w, h }
+    img.style.left = `${(vw - w) / 2}px`
+    img.style.top = `${(vh - h) / 2}px`
+    img.style.width = `${w}px`
+    img.style.height = `${h}px`
+    img.style.transform = `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`
+    img.style.transformOrigin = 'center center'
+  }, [modalUrl, zoom])
+  useEffect(() => {
+    if (!imgRef.current) return
+    const { w, h } = containerRef.current
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    imgRef.current.style.left = `${(vw - w) / 2 + offset.x}px`
+    imgRef.current.style.top = `${(vh - h) / 2 + offset.y}px`
+    imgRef.current.style.transform = `scale(${zoom})`
+    imgRef.current.style.transformOrigin = 'center center'
+  }, [zoom, offset])
   if (!block?.content) return null
   const imageBlocks = block.content.filter((b: any) => b.type === 'image' && b.attachment)
   const textBlocks = block.content.filter((b: any) => b.type === 'text' && b.text)
