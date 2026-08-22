@@ -128,54 +128,13 @@ export function apply(ctx: Context, config: Config = {}): void {
             const model = ch.model
             let response: Response
             try {
-              if (srcImage) {
-                let refBytes: BlobPart = new Uint8Array([])
-                let refType = 'image/png'
-                const am = srcImage.match(/attachmentId=(sha256:[0-9a-f]+)/)
-                if (am?.[1]) {
-                  const hash = am[1].replace(/^sha256:/, '')
-                  const fp = path.join(dshHome, 'attachments', 'v1', 'objects', hash.slice(0, 2), hash)
-                  refBytes = new Uint8Array(await fs.readFile(fp))
-                } else if (/^https?:\/\//.test(srcImage)) {
-                  const r2 = await fetch(srcImage, { redirect: 'follow', signal: exec.signal })
-                  if (!r2.ok) throw new Error(`参考图读取失败（HTTP ${r2.status}）`)
-                  refBytes = new Uint8Array(await r2.arrayBuffer())
-                  const ct = (r2.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase() ?? ''
-                  if (['image/png','image/jpeg','image/webp','image/gif'].includes(ct)) refType = ct
-                } else {
-                  refBytes = new Uint8Array(await fs.readFile(srcImage))
-                }
-                const form = new FormData()
-                form.append('model', model)
-                form.append('prompt', args.prompt)
-                form.append('n', '1')
-                form.append('size', resolvedSize)
-                form.append('image', new Blob([refBytes], { type: refType }), 'reference.png')
-                response = await fetch(`${baseURL}/images/edits`, {
-                  method: 'POST', redirect: 'error', signal: exec.signal,
-                  headers: { authorization: `Bearer ${cred.value}` },
-                  body: form,
-                })
-                if (!response.ok && response.status === 404) {
-                  response = await fetch(`${baseURL}/images/generations`, {
-                    method: 'POST', redirect: 'error', signal: exec.signal,
-                    headers: { authorization: `Bearer ${cred.value}`, 'content-type': 'application/json' },
-                    body: JSON.stringify({ model, prompt: `[参考图片: ${srcImage}] ${args.prompt}`, size: resolvedSize, n: 1 }),
-                  })
-                }
-              } else {
-                response = await fetch(`${baseURL}/images/generations`, {
-                  method: 'POST', redirect: 'error', signal: exec.signal,
-                  headers: { authorization: `Bearer ${cred.value}`, 'content-type': 'application/json' },
-                  body: JSON.stringify({ model, prompt: args.prompt, size: resolvedSize, n: 1 }),
-                })
+              // 抽取响应处理逻辑，避免代码重复
+            async function handleResponse(r: Response): Promise<{ attachment: ImageAttachmentRef; model: string; output: string; prompt: string }> {
+              if (!r.ok) {
+                const text = (await r.text()).slice(0, 300)
+                throw new Error(`HTTP ${r.status}: ${text}`)
               }
-              if (!response.ok) {
-                const text = (await response.text()).slice(0, 300)
-                throw new Error(`HTTP ${response.status}: ${text}`)
-              }
-              // 成功
-              const payload = await response.json() as { data?: Array<{ b64_json?: string; url?: string }> }
+              const payload = await r.json() as { data?: Array<{ b64_json?: string; url?: string }> }
               const image = payload.data?.[0]
               if (!image) throw new Error('API 返回空结果')
               let data: Uint8Array; let mediaType: ImageAttachmentRef['mediaType'] = 'image/png'
@@ -196,6 +155,63 @@ export function apply(ctx: Context, config: Config = {}): void {
               if (!ctx.attachments.imageLimits.mediaTypes.includes(mediaType)) throw new Error(`不支持 ${mediaType} 格式`)
               const attachment = await ctx.attachments.saveImage({ data, mediaType, name: 'generated-image' })
               return { attachment, model, output: resolvedSize, prompt: args.prompt }
+            }
+
+            if (srcImage) {
+              // 解析参考图
+              let refBytes: BlobPart = new Uint8Array([])
+              let refType = 'image/png'
+              const am = srcImage.match(/attachmentId=(sha256:[0-9a-f]+)/)
+              if (am?.[1]) {
+                const hash = am[1].replace(/^sha256:/, '')
+                const fp = path.join(dshHome, 'attachments', 'v1', 'objects', hash.slice(0, 2), hash)
+                refBytes = new Uint8Array(await fs.readFile(fp))
+              } else if (/^https?:\/\//.test(srcImage)) {
+                const r2 = await fetch(srcImage, { redirect: 'follow', signal: exec.signal })
+                if (!r2.ok) throw new Error(`参考图读取失败（HTTP ${r2.status}）`)
+                refBytes = new Uint8Array(await r2.arrayBuffer())
+                const ct = (r2.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase() ?? ''
+                if (['image/png','image/jpeg','image/webp','image/gif'].includes(ct)) refType = ct
+              } else {
+                // 不是 URL 也不是附件 ID，尝试本地文件路径；文件不存在则忽略参考图
+                try {
+                  refBytes = new Uint8Array(await fs.readFile(srcImage))
+                } catch {
+                  // 参考图不存在，降级为文生图
+                  response = await fetch(`${baseURL}/images/generations`, {
+                    method: 'POST', redirect: 'error', signal: exec.signal,
+                    headers: { authorization: `Bearer ${cred.value}`, 'content-type': 'application/json' },
+                    body: JSON.stringify({ model, prompt: args.prompt, size: resolvedSize, n: 1 }),
+                  })
+                  return await handleResponse(response)
+                }
+              }
+              const form = new FormData()
+              form.append('model', model)
+              form.append('prompt', args.prompt)
+              form.append('n', '1')
+              form.append('size', resolvedSize)
+              form.append('image', new Blob([refBytes], { type: refType }), 'reference.png')
+              response = await fetch(`${baseURL}/images/edits`, {
+                method: 'POST', redirect: 'error', signal: exec.signal,
+                headers: { authorization: `Bearer ${cred.value}` },
+                body: form,
+              })
+              if (!response.ok && response.status === 404) {
+                response = await fetch(`${baseURL}/images/generations`, {
+                  method: 'POST', redirect: 'error', signal: exec.signal,
+                  headers: { authorization: `Bearer ${cred.value}`, 'content-type': 'application/json' },
+                  body: JSON.stringify({ model, prompt: `[参考图片: ${srcImage}] ${args.prompt}`, size: resolvedSize, n: 1 }),
+                })
+              }
+            } else {
+              response = await fetch(`${baseURL}/images/generations`, {
+                method: 'POST', redirect: 'error', signal: exec.signal,
+                headers: { authorization: `Bearer ${cred.value}`, 'content-type': 'application/json' },
+                body: JSON.stringify({ model, prompt: args.prompt, size: resolvedSize, n: 1 }),
+              })
+            }
+            return await handleResponse(response)
             } catch (e) {
               lastErr.push(`渠道「${ch.name}」(${ch.baseURL}): ${e instanceof Error ? e.message : String(e)}`)
             }
