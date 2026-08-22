@@ -106,20 +106,37 @@ export function apply(ctx: Context, config: Config = {}): void {
       const baseURL = channel.baseURL.replace(/\/+$/, '')
       const model = channel.model
       const size = args.size ?? '1024x1024'
-      const srcImage = args.image?.trim()
+      // 将客户端传入的图片URL（可能含SSH隧道端口）转换为服务端直连地址
+      const dshUrl = new URL(`http://127.0.0.1:3080`)
+      const normalizeImageUrl = (url: string) => url.replace(/^https?:\/\/[^/]+/, dshUrl.origin)
+      const srcImage = normalizeImageUrl(args.image?.trim() ?? '')
       // 图生图策略: 优先 /images/edits (multipart)，404 时降级到 /images/generations
       let response: Response
       if (srcImage) {
-        // 下载参考图
-        const imgResp = await fetch(srcImage, { redirect: 'follow', signal: exec.signal })
-        if (!imgResp.ok) throw new Error(`参考图读取失败（HTTP ${imgResp.status}）`)
-        const blob = await imgResp.blob()
+        // 解析参考图：支持本机附件 URL、本地路径、远程 URL
+        let refBytes: BlobPart
+        let refType = 'image/png'
+        const attachmentMatch = srcImage.match(/attachmentId=(sha256:[0-9a-f]+)/)
+        if (attachmentMatch?.[1]) {
+          // 本机附件：直接从磁盘读取
+          const hash = attachmentMatch[1].replace(/^sha256:/, '')
+          const filePath = path.join(dshHome, 'attachments', 'v1', 'objects', hash.slice(0, 2), hash)
+          refBytes = new Uint8Array(await fs.readFile(filePath))
+        } else if (/^https?:\/\//.test(srcImage)) {
+          const imgResp = await fetch(srcImage, { redirect: 'follow', signal: exec.signal })
+          if (!imgResp.ok) throw new Error(`参考图读取失败（HTTP ${imgResp.status}）`)
+          refBytes = new Uint8Array(await imgResp.arrayBuffer())
+          const ct = (imgResp.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase() ?? ''
+          if (['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(ct)) refType = ct
+        } else {
+          refBytes = new Uint8Array(await fs.readFile(srcImage))
+        }
         const form = new FormData()
         form.append('model', model)
         form.append('prompt', args.prompt)
         form.append('n', '1')
         form.append('size', size)
-        form.append('image', blob, 'reference.png')
+        form.append('image', new Blob([refBytes], { type: refType }), 'reference.png')
         response = await fetch(`${baseURL}/images/edits`, {
           method: 'POST', redirect: 'error', signal: exec.signal,
           headers: { authorization: `Bearer ${credential.value}` },
