@@ -153,59 +153,61 @@ export function apply(ctx: Context): void {
     }, ImageResultCard))
   })
 
-  // Make Make 快捷按钮（输入框左侧，小眼睛之前）
+  // 快捷按钮
   ctx.slots.inject('conversation.input.left' as any, () => (ctx.slots.register as any)({
     name: 'conversation.input.left',
-    id: 'dsh-makemake-image-btn',
+    id: 'dsh-makemake-btns',
     order: 90,
-    inject: (): {} => ({}),
-  }, () => {
-    const [visible, setVisible] = useState(true)
-    useEffect(() => {
-      try {
-        const v = scope.getSnapshot()
-        setVisible(v.value?.enabled !== false)
-      } catch { /* ignore */ }
-    }, [])
-    if (!visible) return null
-    const inject = (cmd: string) => {
-      const ta = document.querySelector<HTMLTextAreaElement>('textarea[data-phase]')
-      if (!ta) return
-      ta.focus()
-      // 模拟用户输入斜杠命令
-      const nativeInput = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')
-      nativeInput?.set?.call(ta, ta.value + cmd)
-      ta.dispatchEvent(new Event('input', { bubbles: true }))
-    }
-    return (
-      <>
-        <button type="button" onClick={() => inject('/makemake_image ')}
-          title="点击填入出图命令"
-          style={{
-            display: 'grid', placeItems: 'center', flex: 'none', width: 28, height: 28,
-            border: 'none', borderRadius: 999, background: 'transparent', cursor: 'pointer',
-            color: 'rgb(0, 180, 255)', fontWeight: 600, fontSize: 14,
-            transition: 'color .15s, opacity .15s', opacity: 0.7,
-          }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>
-          </svg>
-        </button>
-        <button type="button" onClick={() => inject('/makemake_video ')}
-          title="点击填入出视频命令"
-          style={{
-            display: 'grid', placeItems: 'center', flex: 'none', width: 28, height: 28,
-            border: 'none', borderRadius: 999, background: 'transparent', cursor: 'pointer',
-            color: 'rgb(0, 180, 255)', fontWeight: 600, fontSize: 14,
-            transition: 'color .15s, opacity .15s', opacity: 0.7,
-          }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="2" y="4" width="14" height="16" rx="2" ry="2"/><path d="m16 8 4-2.5v13L16 16"/>
-          </svg>
-        </button>
-      </>
-    )
-  }))
+    inject: (): { scope: SettingsScope<MakemakeSettings> } => ({ scope }),
+  }, (props: { scope: SettingsScope<MakemakeSettings> }) => <MakeMakeButtons scope={props.scope} />))
+}
+
+function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) {
+  const [visible, setVisible] = useState(true)
+  useEffect(() => {
+    try {
+      const v = scope.getSnapshot()
+      setVisible(v.value?.enabled !== false)
+    } catch { /* ignore */ }
+  }, [])
+  if (!visible) return null
+  const inject = (cmd: string) => {
+    const ta = document.querySelector<HTMLTextAreaElement>('textarea[data-phase]')
+    if (!ta) return
+    ta.focus()
+    const start = ta.selectionStart ?? ta.value.length
+    ta.value = ta.value.slice(0, start) + cmd + ta.value.slice(start)
+    ta.selectionStart = ta.selectionEnd = start + cmd.length
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+  return (
+    <>
+      <button type="button" onClick={() => inject('/make出图 ')}
+        title="点击填入出图命令"
+        style={{
+          display: 'grid', placeItems: 'center', flex: 'none', width: 28, height: 28,
+          border: 'none', borderRadius: 999, background: 'transparent', cursor: 'pointer',
+          color: '#fff', opacity: 0.75,
+          transition: 'color .15s, opacity .15s',
+        }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>
+        </svg>
+      </button>
+      <button type="button" onClick={() => inject('/make视频 ')}
+        title="点击填入出视频命令"
+        style={{
+          display: 'grid', placeItems: 'center', flex: 'none', width: 28, height: 28,
+          border: 'none', borderRadius: 999, background: 'transparent', cursor: 'pointer',
+          color: '#fff', opacity: 0.75,
+          transition: 'color .15s, opacity .15s',
+        }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="2" y="4" width="14" height="16" rx="2" ry="2"/><path d="m16 8 4-2.5v13L16 16"/>
+        </svg>
+      </button>
+    </>
+  )
 }
 
 function MakemakePluginCard(props: CardProps) {
@@ -267,7 +269,6 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
   const [chKey, setChKey] = useState('')
   const [keyConfigured, setKeyConfigured] = useState(false)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
-  // Live settings state — refreshed on every scope change
   const [imageChannels, setImageChannels] = useState<Channel[]>([])
   const [videoChannels, setVideoChannels] = useState<Channel[]>([])
   const [selectedImageChannel, setSelectedImageChannel] = useState('')
@@ -471,9 +472,9 @@ function VideoChannelPanel({
             <input style={inputStyle} value={chModel} onChange={e => setChModel(e.target.value)} placeholder={type === 'image' ? 'gpt-image-2' : 'sora'} />
           </div>
           <div style={fieldStyle}>
-            <label style={labelStyle}>API Key</label>
-            <input style={inputStyle} type="password" autoComplete="off" value={chKey} onChange={e => setChKey(e.target.value)}
-              placeholder={keyConfigured ? '留空保持已配置的 Key' : '输入 API Key'} />
+            <label style={labelStyle}>API Key（每行一个，自动轮询）</label>
+            <textarea style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }} autoComplete="off" value={chKey} onChange={e => setChKey(e.target.value)}
+              placeholder={keyConfigured ? '留空保持已配置的 Key' : '每行一个 API Key\n自动轮询，429/限流自动跳过'} />
             {keyConfigured && <span style={{ fontSize: 11, color: 'var(--dsw-alias-state-success-primary)' }}>✓ Key 已配置</span>}
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center' }}>
@@ -506,44 +507,6 @@ function BigButton({ icon, label, tag, count, active, onClick }: {
         color: 'var(--dsw-alias-label-tertiary)',
       }}>
         <polyline points="6 9 12 15 18 9" />
-      </svg>
-    </button>
-  )
-}
-
-function PrinterToggle({ scope }: { scope: SettingsScope<MakemakeSettings> }) {
-  const [visible, setVisible] = useState(true)
-  const [active, setActive] = useState(true)
-
-  useEffect(() => {
-    const loadState = () => {
-      try {
-        const v = scope.getSnapshot().value
-        setVisible(v?.enabled !== false)
-        setActive(v?.enabled !== false)
-      } catch { /* ignore */ }
-    }
-    loadState()
-    return scope.subscribe(loadState)
-  }, [])
-
-  if (!visible) return null
-
-  const toggle = () => setActive(v => !v)
-
-  return (
-    <button type="button" onClick={toggle}
-      title={active ? '临时关闭生成工具' : '临时开启生成工具'}
-      style={{
-        display: 'grid', placeItems: 'center', flex: 'none', width: 28, height: 28,
-        border: 'none', borderRadius: 999, background: 'transparent', cursor: 'pointer',
-        color: active ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-label-tertiary)',
-        opacity: active ? 0.7 : 0.3,
-        transition: 'color .15s, opacity .15s',
-      }}>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="6 9 6 2 18 2 18 9" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" />
-        {active === false && <line x1="3" y1="21" x2="21" y2="3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />}
       </svg>
     </button>
   )
@@ -662,7 +625,6 @@ function ImageResultCard(props: ImageCardProps) {
   const imageBlocks = block.content.filter((b: any) => b.type === 'image' && b.attachment)
   const textBlocks = block.content.filter((b: any) => b.type === 'text' && b.text)
 
-  // 从文本块里提取 prompt（格式：已生成图片（模型，尺寸）：prompt）
   let prompt = ''
   for (const tb of textBlocks) {
     const t = tb.text
