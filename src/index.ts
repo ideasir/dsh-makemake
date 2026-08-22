@@ -345,7 +345,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         // 兼容带 /v1 和不带 /v1 的 baseURL
         const videoBase = baseURL.endsWith('/v1') ? baseURL : `${baseURL}/v1`
         try {
-          // 提交视频生成任务（队列满时自动重试 3 次）
+          // 提交视频生成任务
           let submitResp: Response
           let submitAttempts = 0
           while (true) {
@@ -356,13 +356,12 @@ export function apply(ctx: Context, config: Config = {}): void {
             })
             if (submitResp.ok) break
             const text = (await submitResp.text()).slice(0, 300)
+            // 队列满不标记 Key 失效，直接换下一个 Key
             if (submitResp.status === 503 || /queue_full/i.test(text)) {
-              pool.fail(sk, 30_000)
-              if (++submitAttempts >= 3) throw new Error(`提交任务失败（队列满，重试 ${submitAttempts} 次后放弃）：${text}`)
-              await new Promise(r => setTimeout(r, 3000))
-              continue
+              throw new Error(`队列满，跳过此 Key`)
             }
-            throw new Error(`提交任务失败（HTTP ${submitResp.status}）：${text}`)
+            if (++submitAttempts >= 3) throw new Error(`提交任务失败（HTTP ${submitResp.status}）：${text}`)
+            await new Promise(r => setTimeout(r, 2000))
           }
           const submitData = await submitResp.json() as { id?: string; error?: { message?: string } }
           if (submitData.error) {
