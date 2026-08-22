@@ -318,13 +318,9 @@ export function apply(ctx: Context, config: Config = {}): void {
       },
       render: (_args, value) => [
         { type: 'text', text: `已生成视频（${value.model}，时长 ${value.duration}）：${value.prompt}` },
+        { type: 'text', text: `视频链接：${value.url}` },
       ],
-      presentationMeta: (args, value) => ({
-        kind: 'dsh-makemake-video',
-        model: value.model,
-        duration: value.duration,
-        prompt: (args as { prompt: string }).prompt,
-      }),
+      presentationMeta: () => ({ kind: 'dsh-makemake-video' }),
     },
     async execute(args, exec): Promise<{ url: string; model: string; duration: string; prompt: string }> {
       const settings = current() as unknown as RuntimeSettings
