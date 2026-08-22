@@ -91,10 +91,11 @@ export function apply(ctx: Context, config: Config = {}): void {
         { type: 'text', text: `已生成图片（${value.model}，${value.output}）：${value.prompt}` },
       ],
       presentationMeta: (args, value) => ({
-        kind: 'dsh-makemake', attachment: value.attachment,
-        model: value.model, output: value.output,
+        kind: 'dsh-makemake',
+        model: value.model,
+        output: value.output,
         prompt: (args as { prompt: string }).prompt,
-        srcImage: (args as { image?: string }).image,
+        // 注意：不传 attachment，attachment 由 render() 的 content blocks 渲染
       }),
     },
     async execute(args, exec): Promise<{ attachment: ImageAttachmentRef; model: string; output: string; prompt: string }> {
@@ -210,9 +211,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     presentResult: (_args, result) => {
       const meta = result.meta as Record<string, unknown> | undefined
       if (meta?.kind !== 'dsh-makemake') return undefined
-      const att = meta.attachment as ImageAttachmentRef | undefined
-      if (!att || typeof att.attachmentId !== 'string') return undefined
-      return { card: 'generic', title: '已生成图片', content: [{ type: 'image', attachment: att }] }
+      return { card: 'generic', title: '已生成图片' }
     },
   }))
 
