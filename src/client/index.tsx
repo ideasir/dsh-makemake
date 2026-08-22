@@ -636,7 +636,7 @@ function ImageResultCard(props: ImageCardProps) {
         const att = b.attachment
         const url = `${window.location.origin}/plugins/dsh-makemake/image?attachmentId=${att?.attachmentId}`
         return (
-          <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start', width: '100%' }}>
+          <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start', maxWidth: 350 }}>
             <div style={{ cursor: 'zoom-in', position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}
               onClick={() => openModal(url)}>
               <img src={url} alt="generated"
@@ -645,16 +645,16 @@ function ImageResultCard(props: ImageCardProps) {
               />
             </div>
             {/* 图片信息 + 操作按钮 */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 350, alignItems: 'flex-start' }}>
               {att && (
                 <div style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1.5 }}>
                   {att.width}×{att.height} · {(att.bytes / 1024).toFixed(0)} KB
                 </div>
               )}
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', maxWidth: 350 }}>
                 {prompt && (
                   <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', flex: 1,
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 'calc(100% - 144px)' }}
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}
                     title={prompt}>{prompt}</span>
                 )}
                 <button onClick={(e) => { e.stopPropagation(); void navigator.clipboard.writeText(url) }}
