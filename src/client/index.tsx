@@ -645,28 +645,43 @@ function ImageResultCard(props: ImageCardProps) {
               />
             </div>
             {/* 图片信息 + 操作按钮 */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 350, alignItems: 'flex-start', alignSelf: 'flex-start' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxWidth: 350, alignItems: 'flex-start', alignSelf: 'flex-start' }}>
               {att && (
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center', maxWidth: '100%', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 5, alignItems: 'center', maxWidth: '100%', flexWrap: 'wrap' }}>
+                  {/* 引用按钮 */}
+                  <button onClick={(e) => {
+                    e.stopPropagation()
+                    void navigator.clipboard.writeText(url)
+                    // focus DSH input
+                    const ta = document.querySelector<HTMLTextAreaElement>('textarea[data-type="composer"]') || document.querySelector<HTMLTextAreaElement>('textarea')
+                    if (ta) { ta.focus(); ta.value += url }
+                  }}
+                    title="引用此图到对话框"
+                    style={{ flex: 'none', width: 26, height: 26, borderRadius: 6,
+                      border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent',
+                      cursor: 'pointer', display: 'grid', placeItems: 'center',
+                      color: 'var(--dsw-alias-brand-primary)', transition: 'background .12s' }}
+                    onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent)' }}
+                    onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'transparent' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                    </svg>
+                  </button>
+                  {/* 分辨率 */}
                   <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>
                     {att.width}×{att.height}
                   </span>
+                  {/* 大小 */}
                   <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', whiteSpace: 'nowrap' }}>
                     {(att.bytes / 1024).toFixed(0)} KB
                   </span>
+                  {/* 提示词 */}
                   {prompt && (
                     <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', flex: 1,
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, cursor: 'default' }}
                       title={prompt}>{prompt}</span>
                   )}
-                  <button onClick={(e) => { e.stopPropagation(); void navigator.clipboard.writeText(url) }}
-                    style={{ flex: 'none', fontSize: 11, padding: '2px 8px', borderRadius: 4,
-                      border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent',
-                      color: 'var(--dsw-alias-brand-primary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                    onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent)' }}
-                    onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'transparent' }}>
-                    引用
-                  </button>
+                  {/* 复制提示词 */}
                   <button onClick={(e) => { e.stopPropagation(); void navigator.clipboard.writeText(prompt) }}
                     style={{ flex: 'none', fontSize: 11, padding: '2px 8px', borderRadius: 4,
                       border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent',

@@ -107,28 +107,32 @@ export function apply(ctx: Context, config: Config = {}): void {
       const model = channel.model
       const size = args.size ?? '1024x1024'
       const srcImage = args.image?.trim()
-      // 图生图: 走 /images/edits (multipart) 或 /images/generations (带 image_url)
+      // 图生图策略: 优先 /images/edits (multipart)，404 时降级到 /images/generations
       let response: Response
       if (srcImage) {
+        // 下载参考图
+        const imgResp = await fetch(srcImage, { redirect: 'follow', signal: exec.signal })
+        if (!imgResp.ok) throw new Error(`参考图读取失败（HTTP ${imgResp.status}）`)
+        const blob = await imgResp.blob()
         const form = new FormData()
         form.append('model', model)
         form.append('prompt', args.prompt)
         form.append('n', '1')
         form.append('size', size)
-        // 支持 URL 或本地 attachment 路径
-        if (/^https?:\/\//.test(srcImage)) {
-          form.append('image', srcImage)
-        } else {
-          const imgResp = await fetch(srcImage, { redirect: 'follow', signal: exec.signal })
-          if (!imgResp.ok) throw new Error(`参考图读取失败（HTTP ${imgResp.status}）`)
-          const blob = await imgResp.blob()
-          form.append('image', blob, 'reference.png')
-        }
+        form.append('image', blob, 'reference.png')
         response = await fetch(`${baseURL}/images/edits`, {
           method: 'POST', redirect: 'error', signal: exec.signal,
           headers: { authorization: `Bearer ${credential.value}` },
           body: form,
         })
+        if (!response.ok && response.status === 404) {
+          // 降级：带图片 URL 在 prompt 中走文生图
+          response = await fetch(`${baseURL}/images/generations`, {
+            method: 'POST', redirect: 'error', signal: exec.signal,
+            headers: { authorization: `Bearer ${credential.value}`, 'content-type': 'application/json' },
+            body: JSON.stringify({ model, prompt: `[参考图片: ${srcImage}] ${args.prompt}`, size, n: 1 }),
+          })
+        }
       } else {
         response = await fetch(`${baseURL}/images/generations`, {
           method: 'POST', redirect: 'error', signal: exec.signal,
