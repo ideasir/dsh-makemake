@@ -393,13 +393,16 @@ export function apply(ctx: Context, config: Config = {}): void {
               const text = (await pollResp.text()).slice(0, 300)
               throw new Error(`查询任务状态失败（HTTP ${pollResp.status}）：${text}`)
             }
-            videoTask = await pollResp.json() as { status?: string; video_url?: string; error?: { message?: string } }
+            videoTask = await pollResp.json() as { status?: string; video_url?: string; metadata?: { url?: string }; error?: { message?: string } }
             if (videoTask.error) throw new Error(videoTask.error.message ?? '视频生成失败')
-            if (videoTask.status === 'succeeded') break
+            // Agnes API 状态 completed 表示成功
+            if (videoTask.status === 'succeeded' || videoTask.status === 'completed') break
             if (videoTask.status === 'failed') throw new Error(`视频生成失败（status: ${videoTask.status}）`)
           }
-          if (!videoTask?.video_url) throw new Error('视频生成完成但未返回视频 URL')
-          return { url: videoTask.video_url, model: ch.model, duration, prompt: args.prompt }
+          // 获取视频 URL：video_url 或 metadata.url
+          const videoUrl = videoTask?.video_url || videoTask?.metadata?.url || ''
+          if (!videoUrl) throw new Error('视频生成完成但未返回视频 URL')
+          return { url: videoUrl, model: ch.model, duration, prompt: args.prompt }
         } catch (e) {
           lastErr.push(`渠道「${ch.name}」(${ch.baseURL}): ${e instanceof Error ? e.message : String(e)}`)
         }
