@@ -72,8 +72,6 @@ const STYLE = `
 .dsh-mm-dot.ok{background:var(--dsw-alias-state-success-primary);box-shadow:0 0 6px var(--dsw-alias-state-success-primary)}
 .dsh-mm-dot.off{background:var(--dsw-alias-label-tertiary)}
 .dsh-mm-badge{position:absolute;top:-6px;right:8px;font-size:10px;line-height:16px;font-weight:600;color:var(--dsw-alias-state-error-primary);background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:4px;padding:0 6px}
-/* 命令高亮覆盖为亮蓝色 */
-.uV2eYG_hlToken,.hlToken{color:#00d4ff!important;text-shadow:0 0 10px rgba(0,212,255,0.5)!important}
 `
 
 export const inject = ['slots', 'connection', 'remote', 'settingsScope'] as const
@@ -134,6 +132,30 @@ export function apply(ctx: Context): void {
     document.head.appendChild(style)
     return () => { style.remove() }
   }, 'dsh-makemake: styles')
+
+  // 只给 /make 命令高亮亮蓝色，不影响其他命令的默认颜色
+  ctx.effect(() => {
+    let mo: MutationObserver | null = null
+    const paint = () => {
+      document.querySelectorAll<HTMLElement>('mark[data-decoration="token"]').forEach(el => {
+        if (el.textContent?.startsWith('/make')) {
+          el.style.color = '#00d4ff'
+          el.style.textShadow = '0 0 10px rgba(0,212,255,0.5)'
+        }
+      })
+    }
+    // 初始执行
+    paint()
+    // 监听 backdrop 区域变化
+    const target = document.querySelector('.uV2eYG_backdrop') || document.querySelector('[class*="backdrop"]')
+    if (target) {
+      mo = new MutationObserver(paint)
+      mo.observe(target, { childList: true, subtree: true, characterData: true })
+    }
+    // fallback: 每 500ms 检查一次
+    const iv = setInterval(paint, 500)
+    return () => { mo?.disconnect(); clearInterval(iv) }
+  }, 'dsh-makemake: hl-color')
 
   const register = ctx.slots.register.bind(ctx.slots) as unknown as (opts: object, comp: unknown) => () => void
 
