@@ -649,18 +649,24 @@ function ImageResultCard(props: ImageCardProps) {
               {att && (
                 <div style={{ display: 'flex', gap: 5, alignItems: 'center', maxWidth: '100%', flexWrap: 'wrap' }}>
                   {/* 引用按钮 */}
-                  <button onClick={(e) => {
+                  <button onClick={async (e) => {
                     e.stopPropagation()
-                    void navigator.clipboard.writeText(url)
-                    // focus DSH input
-                    const ta = document.querySelector<HTMLTextAreaElement>('textarea[data-type="composer"]') || document.querySelector<HTMLTextAreaElement>('textarea')
-                    if (ta) { ta.focus(); ta.value += url }
+                    try {
+                      const resp = await fetch(url)
+                      if (!resp.ok) throw new Error('load-failed')
+                      const blob = await resp.blob()
+                      const file = new File([blob], 'reference.png', { type: blob.type || 'image/png' })
+                      const ta = document.querySelector<HTMLTextAreaElement>('textarea[data-phase]')
+                      if (!ta) return
+                      const dt = new DataTransfer()
+                      dt.items.add(file)
+                      const pasteEvent = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt })
+                      ta.dispatchEvent(pasteEvent)
+                      void navigator.clipboard.writeText(url)
+                    } catch { void navigator.clipboard.writeText(url) }
                   }}
                     title="引用此图到对话框"
-                    style={{ flex: 'none', width: 26, height: 26, borderRadius: 6,
-                      border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent',
-                      cursor: 'pointer', display: 'grid', placeItems: 'center',
-                      color: 'var(--dsw-alias-brand-primary)', transition: 'background .12s' }}
+                    style={{ flex: 'none', width: 26, height: 26, borderRadius: 6, border: 'none', background: 'transparent', cursor: 'pointer', display: 'grid', placeItems: 'center', color: 'var(--dsw-alias-brand-primary)', transition: 'background .12s' }}
                     onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent)' }}
                     onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'transparent' }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
