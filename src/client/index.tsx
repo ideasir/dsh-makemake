@@ -626,10 +626,6 @@ function ImageResultCard(props: ImageCardProps) {
     }
   }
 
-  const copyPrompt = () => {
-    void navigator.clipboard.writeText(prompt)
-  }
-
   if (block.isError) {
     return <div style={{ padding: '8px 12px', fontSize: 13, color: 'var(--dsw-alias-state-error-primary)', background: 'var(--dsw-alias-bg-layer-3)', borderRadius: 8, marginTop: 4 }}>图片生成失败：{block.error?.message ?? '未知错误'}</div>
   }
@@ -648,13 +644,28 @@ function ImageResultCard(props: ImageCardProps) {
                 onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
               />
             </div>
-            {/* 迭代操作按钮 */}
-            {prompt && (
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center', width: '100%' }}>
-                <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', flex: 1,
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 'calc(100% - 72px)' }}
-                  title={prompt}>{prompt}</span>
-                <button onClick={(e) => { e.stopPropagation(); copyPrompt() }}
+            {/* 图片信息 + 操作按钮 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
+              {att && (
+                <div style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1.5 }}>
+                  {att.width}×{att.height} · {(att.bytes / 1024).toFixed(0)} KB
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                {prompt && (
+                  <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', flex: 1,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 'calc(100% - 144px)' }}
+                    title={prompt}>{prompt}</span>
+                )}
+                <button onClick={(e) => { e.stopPropagation(); void navigator.clipboard.writeText(url) }}
+                  style={{ flex: 'none', fontSize: 11, padding: '2px 8px', borderRadius: 4,
+                    border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent',
+                    color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                  onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'var(--dsw-alias-bg-layer-1)' }}
+                  onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'transparent' }}>
+                  引用
+                </button>
+                <button onClick={(e) => { e.stopPropagation(); void navigator.clipboard.writeText(prompt) }}
                   style={{ flex: 'none', fontSize: 11, padding: '2px 8px', borderRadius: 4,
                     border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent',
                     color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
@@ -663,7 +674,7 @@ function ImageResultCard(props: ImageCardProps) {
                   复制提示词
                 </button>
               </div>
-            )}
+            </div>
           </div>
         )
       })}

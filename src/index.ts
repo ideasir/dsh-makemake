@@ -71,10 +71,11 @@ export function apply(ctx: Context, config: Config = {}): void {
   // ─── Image tool ────────────────────────────────────────────────────────
   ctx.tools.register(defineTool({
     name: 'makemake_image',
-    description: 'Generate one image using the Make Make configured channel. Use when the user asks to create, draw, or generate an image.',
+    description: 'Generate one image using the Make Make configured channel. Use when the user asks to create, draw, or generate an image. Pass "image" (URL or path) to do image-to-image (img2img) transformation based on a reference image.',
     parameters: {
       prompt: { type: 'string', required: true, description: 'Complete description of the image to generate.' },
       size: { type: 'string', description: 'Optional image size, e.g. "1024x1024" or "2K".' },
+      image: { type: 'string', description: 'Optional reference image URL or path for image-to-image (img2img). When passed, the API uses it as the source image and transforms it per the prompt.' },
     },
     output: {
       schema: {
@@ -93,6 +94,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         kind: 'dsh-makemake', attachment: value.attachment,
         model: value.model, output: value.output,
         prompt: (args as { prompt: string }).prompt,
+        srcImage: (args as { image?: string }).image,
       }),
     },
     async execute(args, exec): Promise<{ attachment: ImageAttachmentRef; model: string; output: string; prompt: string }> {
@@ -104,11 +106,36 @@ export function apply(ctx: Context, config: Config = {}): void {
       const baseURL = channel.baseURL.replace(/\/+$/, '')
       const model = channel.model
       const size = args.size ?? '1024x1024'
-      const response = await fetch(`${baseURL}/images/generations`, {
-        method: 'POST', redirect: 'error', signal: exec.signal,
-        headers: { authorization: `Bearer ${credential.value}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ model, prompt: args.prompt, size, n: 1 }),
-      })
+      const srcImage = args.image?.trim()
+      // 图生图: 走 /images/edits (multipart) 或 /images/generations (带 image_url)
+      let response: Response
+      if (srcImage) {
+        const form = new FormData()
+        form.append('model', model)
+        form.append('prompt', args.prompt)
+        form.append('n', '1')
+        form.append('size', size)
+        // 支持 URL 或本地 attachment 路径
+        if (/^https?:\/\//.test(srcImage)) {
+          form.append('image', srcImage)
+        } else {
+          const imgResp = await fetch(srcImage, { redirect: 'follow', signal: exec.signal })
+          if (!imgResp.ok) throw new Error(`参考图读取失败（HTTP ${imgResp.status}）`)
+          const blob = await imgResp.blob()
+          form.append('image', blob, 'reference.png')
+        }
+        response = await fetch(`${baseURL}/images/edits`, {
+          method: 'POST', redirect: 'error', signal: exec.signal,
+          headers: { authorization: `Bearer ${credential.value}` },
+          body: form,
+        })
+      } else {
+        response = await fetch(`${baseURL}/images/generations`, {
+          method: 'POST', redirect: 'error', signal: exec.signal,
+          headers: { authorization: `Bearer ${credential.value}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ model, prompt: args.prompt, size, n: 1 }),
+        })
+      }
       if (!response.ok) {
         const text = (await response.text()).slice(0, 500)
         throw new Error(`图片生成失败（HTTP ${response.status}）：${text}`)
