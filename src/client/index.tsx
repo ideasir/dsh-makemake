@@ -153,13 +153,59 @@ export function apply(ctx: Context): void {
     }, ImageResultCard))
   })
 
-  // Printer toggle
-  ctx.slots.inject('conversation.input.right' as any, () => (ctx.slots.register as any)({
-    name: 'conversation.input.right',
-    id: 'dsh-makemake-printer',
-    order: 100,
-    inject: (sessionId: string): { scope: SettingsScope<MakemakeSettings> } => ({ scope }),
-  }, PrinterToggle))
+  // Make Make 快捷按钮（输入框左侧，小眼睛之前）
+  ctx.slots.inject('conversation.input.left' as any, () => (ctx.slots.register as any)({
+    name: 'conversation.input.left',
+    id: 'dsh-makemake-image-btn',
+    order: 90,
+    inject: (): {} => ({}),
+  }, () => {
+    const [visible, setVisible] = useState(true)
+    useEffect(() => {
+      try {
+        const v = scope.getSnapshot()
+        setVisible(v.value?.enabled !== false)
+      } catch { /* ignore */ }
+    }, [])
+    if (!visible) return null
+    const inject = (cmd: string) => {
+      const ta = document.querySelector<HTMLTextAreaElement>('textarea[data-phase]')
+      if (!ta) return
+      ta.focus()
+      // 模拟用户输入斜杠命令
+      const nativeInput = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')
+      nativeInput?.set?.call(ta, ta.value + cmd)
+      ta.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+    return (
+      <>
+        <button type="button" onClick={() => inject('/makemake_image ')}
+          title="点击填入出图命令"
+          style={{
+            display: 'grid', placeItems: 'center', flex: 'none', width: 28, height: 28,
+            border: 'none', borderRadius: 999, background: 'transparent', cursor: 'pointer',
+            color: 'rgb(0, 180, 255)', fontWeight: 600, fontSize: 14,
+            transition: 'color .15s, opacity .15s', opacity: 0.7,
+          }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>
+          </svg>
+        </button>
+        <button type="button" onClick={() => inject('/makemake_video ')}
+          title="点击填入出视频命令"
+          style={{
+            display: 'grid', placeItems: 'center', flex: 'none', width: 28, height: 28,
+            border: 'none', borderRadius: 999, background: 'transparent', cursor: 'pointer',
+            color: 'rgb(0, 180, 255)', fontWeight: 600, fontSize: 14,
+            transition: 'color .15s, opacity .15s', opacity: 0.7,
+          }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="2" y="4" width="14" height="16" rx="2" ry="2"/><path d="m16 8 4-2.5v13L16 16"/>
+          </svg>
+        </button>
+      </>
+    )
+  }))
 }
 
 function MakemakePluginCard(props: CardProps) {

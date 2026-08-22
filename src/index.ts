@@ -6,10 +6,12 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import type {} from '@deepseek-ai/dsh-system-prompt'
 import { Config } from './config.js'
 import { IMAGE_ROUTE } from './shared.js'
 import { serveImage } from './image-route.js'
 import { CREATION_NAMESPACE } from './shared.js'
+import { MAKEMAKE_SKILL } from './skill.js'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 
@@ -19,7 +21,7 @@ export { IMAGE_ROUTE } from './shared.js'
 /** Cordis plugin name. */
 export const name = 'dsh-makemake'
 /** Host services required by the Bundle. */
-export const inject = ['tools', 'attachments', 'credentials', 'webServer', 'settings']
+export const inject = ['tools', 'attachments', 'credentials', 'webServer', 'settings', 'systemPrompt']
 
 interface Channel {
   id: string
@@ -48,6 +50,43 @@ function resolveChannel(settings: RuntimeSettings, type: 'image' | 'video'): Cha
   return selected ?? channels[0]
 }
 
+/** Multi-key pool: round-robin + auto-skip on 429/busy keys. */
+class KeyPool {
+  private keys: string[] = []
+  private idx = 0
+  /** Keys currently rate-limited (429) — skipped until timestamp passes. */
+  private cooldown = new Map<string, number>()
+
+  constructor(raw: string) {
+    // 拆分：支持换行、逗号、分号、空格分隔；去重、去空
+    const parts = raw.split(/[\n\r,;\s]+/).map(s => s.trim()).filter(s => s.length > 0)
+    this.keys = [...new Set(parts)]
+  }
+
+  get size(): number { return this.keys.length }
+
+  /** Take next available key. Returns null if all are cooling down. */
+  next(): string | null {
+    if (this.keys.length === 0) return null
+    const now = Date.now()
+    for (let i = 0; i < this.keys.length; i++) {
+      const k = this.keys[(this.idx + i) % this.keys.length]
+      if (!k) continue
+      const until = this.cooldown.get(k) ?? 0
+      if (now >= until) {
+        this.idx = (this.idx + i + 1) % this.keys.length
+        return k
+      }
+    }
+    return null
+  }
+
+  /** Mark a key as failed (429 / busy) for a while. */
+  fail(key: string, ms = 60_000): void {
+    this.cooldown.set(key, Date.now() + ms)
+  }
+}
+
 export function apply(ctx: Context, config: Config = {}): void {
   const scope = ctx.settings.register(settingsNamespace(CREATION_NAMESPACE), Config, { base: config })
   let current: () => Config = () => scope.get()
@@ -67,6 +106,13 @@ export function apply(ctx: Context, config: Config = {}): void {
     })
     return () => {}
   }, 'dsh-makemake: image route')
+
+  // 注册系统提示词，让模型知道 makemake 工具
+  ctx.systemPrompt.section({
+    name: 'makemake',
+    order: 220,
+    text: MAKEMAKE_SKILL,
+  })
 
   // ─── Image tool ────────────────────────────────────────────────────────
   ctx.tools.register(defineTool({
