@@ -345,18 +345,30 @@ export function apply(ctx: Context, config: Config = {}): void {
         // 兼容带 /v1 和不带 /v1 的 baseURL
         const videoBase = baseURL.endsWith('/v1') ? baseURL : `${baseURL}/v1`
         try {
-          // 提交视频生成任务
-          const submitResp = await fetch(`${videoBase}/videos`, {
-            method: 'POST', redirect: 'error', signal: exec.signal,
-            headers: { authorization: `Bearer ${sk}`, 'content-type': 'application/json' },
-            body: JSON.stringify({ model: ch.model, prompt: args.prompt, duration: parseInt(duration, 10) || 5, n: 1 }),
-          })
-          if (!submitResp.ok) {
+          // 提交视频生成任务（队列满时自动重试 3 次）
+          let submitResp: Response
+          let submitAttempts = 0
+          while (true) {
+            submitResp = await fetch(`${videoBase}/videos`, {
+              method: 'POST', redirect: 'error', signal: exec.signal,
+              headers: { authorization: `Bearer ${sk}`, 'content-type': 'application/json' },
+              body: JSON.stringify({ model: ch.model, prompt: args.prompt, duration: parseInt(duration, 10) || 5, n: 1 }),
+            })
+            if (submitResp.ok) break
             const text = (await submitResp.text()).slice(0, 300)
+            if (submitResp.status === 503 || /queue_full/i.test(text)) {
+              pool.fail(sk, 30_000)
+              if (++submitAttempts >= 3) throw new Error(`提交任务失败（队列满，重试 ${submitAttempts} 次后放弃）：${text}`)
+              await new Promise(r => setTimeout(r, 3000))
+              continue
+            }
             throw new Error(`提交任务失败（HTTP ${submitResp.status}）：${text}`)
           }
           const submitData = await submitResp.json() as { id?: string; error?: { message?: string } }
-          if (submitData.error) throw new Error(submitData.error.message ?? 'API 返回错误')
+          if (submitData.error) {
+            pool.fail(sk)
+            throw new Error(submitData.error.message ?? 'API 返回错误')
+          }
           const taskId = submitData.id
           if (!taskId) throw new Error('API 返回了空任务 ID')
 
