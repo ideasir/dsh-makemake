@@ -645,35 +645,38 @@ function ImageResultCard(props: ImageCardProps) {
               />
             </div>
             {/* 图片信息 + 操作按钮 */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 350, alignItems: 'flex-start' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 350, alignItems: 'flex-start', alignSelf: 'flex-start' }}>
               {att && (
-                <div style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1.5 }}>
-                  {att.width}×{att.height} · {(att.bytes / 1024).toFixed(0)} KB
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', maxWidth: '100%', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    {att.width}×{att.height}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', whiteSpace: 'nowrap' }}>
+                    {(att.bytes / 1024).toFixed(0)} KB
+                  </span>
+                  {prompt && (
+                    <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', flex: 1,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, cursor: 'default' }}
+                      title={prompt}>{prompt}</span>
+                  )}
+                  <button onClick={(e) => { e.stopPropagation(); void navigator.clipboard.writeText(url) }}
+                    style={{ flex: 'none', fontSize: 11, padding: '2px 8px', borderRadius: 4,
+                      border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent',
+                      color: 'var(--dsw-alias-brand-primary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                    onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent)' }}
+                    onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'transparent' }}>
+                    引用
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); void navigator.clipboard.writeText(prompt) }}
+                    style={{ flex: 'none', fontSize: 11, padding: '2px 8px', borderRadius: 4,
+                      border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent',
+                      color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                    onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'var(--dsw-alias-bg-layer-1)' }}
+                    onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'transparent' }}>
+                    复制提示词
+                  </button>
                 </div>
               )}
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', maxWidth: 350 }}>
-                {prompt && (
-                  <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', flex: 1,
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}
-                    title={prompt}>{prompt}</span>
-                )}
-                <button onClick={(e) => { e.stopPropagation(); void navigator.clipboard.writeText(url) }}
-                  style={{ flex: 'none', fontSize: 11, padding: '2px 8px', borderRadius: 4,
-                    border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent',
-                    color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                  onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'var(--dsw-alias-bg-layer-1)' }}
-                  onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'transparent' }}>
-                  引用
-                </button>
-                <button onClick={(e) => { e.stopPropagation(); void navigator.clipboard.writeText(prompt) }}
-                  style={{ flex: 'none', fontSize: 11, padding: '2px 8px', borderRadius: 4,
-                    border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent',
-                    color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                  onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'var(--dsw-alias-bg-layer-1)' }}
-                  onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'transparent' }}>
-                  复制提示词
-                </button>
-              </div>
             </div>
           </div>
         )
