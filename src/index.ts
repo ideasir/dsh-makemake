@@ -274,7 +274,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           const submitResp = await fetch(`${baseURL}/v1/videos`, {
             method: 'POST', redirect: 'error', signal: exec.signal,
             headers: { authorization: `Bearer ${cred.value}`, 'content-type': 'application/json' },
-            body: JSON.stringify({ model: ch.model, prompt: args.prompt, duration, n: 1 }),
+            body: JSON.stringify({ model: ch.model, prompt: args.prompt, duration: parseInt(duration, 10) || 5, n: 1 }),
           })
           if (!submitResp.ok) {
             const text = (await submitResp.text()).slice(0, 300)
