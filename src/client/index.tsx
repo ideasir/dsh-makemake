@@ -175,9 +175,8 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
     const ta = document.querySelector<HTMLTextAreaElement>('textarea[data-phase]')
     if (!ta) return
     ta.focus()
-    const start = ta.selectionStart ?? ta.value.length
-    ta.value = ta.value.slice(0, start) + cmd + ta.value.slice(start)
-    ta.selectionStart = ta.selectionEnd = start + cmd.length
+    const nativeInput = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')
+    nativeInput?.set?.call(ta, ta.value + cmd)
     ta.dispatchEvent(new Event('input', { bubbles: true }))
   }
   return (
