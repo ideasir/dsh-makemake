@@ -1,26 +1,30 @@
-# CHANGE LOG
+# CHANGES.md
 
-## 2026-08-22 适配 DSH 0.1.1-rc.2 + 多渠道管理
+## 2026-08-22 - 图片地址动态适配任意访问方式
 
-### 为什么
-DSH 从 0.1.0-rc.8 升级到 0.1.1-rc.2，需要重新构建适配。同时完善多渠道管理 UI。
+### 问题
+图片路由 `/plugins/dsh-makemake/image` 使用硬编码相对路径，浏览器用当前页面的 origin 拼接。导致：
+- SSH 隧道访问（localhost:3333）→ 请求 localhost:3333/plugins/... → 404（DSH 在 3080）
+- 任何非默认端口的访问方式都会 404
 
-### 改了什么
-- package.json 版本号改为 `0.1.1-rc.2`（跟随 DSH 适配版本）
-- 所有 `@deepseek-ai/*` 依赖升到 `0.1.1-rc.2`
-- **服务端 settings 注册**：`installSettingsSection()` 改为 `ctx.settings.register()`（新版 API，支持 schema 验证和持久化）
-- **API Key 存储**：改用 DSH 核心连接 API `api.credentials.set()`（之前误用 looklook 的 remote，导致"不允许写入该凭据引用"）
-- **响应解析**：`api.settings.update()` 用 `{ ns, patch }` 参数格式，响应读取 `res.result.ok`（之前读 `res.ok` 导致判断失败）
-- **打印机图标**：点击变灰+加斜线（同小眼睛），再点恢复；后台设置关闭才消失
-- **保存反馈**：保存成功显示"✓ 已保存"，失败显示错误
-- **图片渲染**：`render` 函数返回图片 block（`{ type: 'image', attachment }`），工具结果能显示图片
+### 解决方案
+改用 `window.location.origin` 动态获取当前页面 origin，自动适配所有访问方式。
 
-### 踩过的坑
-- DSH API 返回格式是 `{ rpcId, result: { ok, value } }`，不是直接 `{ ok, value }`
-- `settings.update` 的参数名是 `patch` 不是 `section`（type 声明里写 patch）
-- looklook 的 remote 会再包一层 `credentialRef()`，把 `MAKEMAKE_` 前缀改掉，导致保存失败——必须直接用 DSH 核心 API
-- `npm install` 会删掉 profile 里以 symlink 安装的插件，必须重新复制完整目录
-- 插件源码目录删 node_modules 后，node 解析不到 `@deepseek-ai/*`，必须 `npm install` 装回来再整体复制
+**修改文件：**
+- `src/client/index.tsx` - ImageResultCard 组件第 521 行
+  - 旧：`src={`/plugins/dsh-makemake/image?...`}`
+  - 新：`src={`${window.location.origin}/plugins/dsh-makemake/image?...`}`
 
 ### 部署
-见 README.md 或 dsh-looklook/CHANGES.md 的部署流程。
+1. 构建：`npx tsc && npx tsdown -c tsdown.config.ts`
+2. 部署：`cp -r lib/* /root/.dsh/profiles/web/node_modules/dsh-makemake/`
+3. 重启 DSH：`kill <pid> && npx dsh --profile web --port 3080 --no-open`
+
+### 验证
+- 隧道访问：浏览器访问 `http://localhost:3333`，图片地址自动变为 `http://localhost:3333/plugins/dsh-makemake/image`
+- 局域网访问：浏览器访问 `http://10.10.100.10:3080`，图片地址自动变为 `http://10.10.100.10:3080/plugins/dsh-makemake/image`
+- 其他访问方式同理
+
+### 注意事项
+- DSH 官方禁止 `--host 0.0.0.0`，原因是安全考虑（远程代码执行风险），无法绕过
+- SSH 隧道方案继续有效，只需 Windows 上保持隧道运行

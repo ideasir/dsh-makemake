@@ -1,45 +1,84 @@
-# Make Make
+# Make Make Plugin - DeepSeek Harness
 
-> 当前版本 `0821-rc.8`，适配 DSH `v0.1.0-rc.8`。文生图插件，支持 Google Gemini、OpenAI、字节 Seedream。
+图片/视频生成插件，使用 OpenAI 兼容协议，支持多渠道配置。
+
+## 版本
+- 插件版本：0821-rc.8
+- 适配 DSH：rc.8
 
 ## 功能
+- 文生图（多图生成支持）
+- 多图生成（多张参考图）
+- 多轮对话
+- 多渠道配置（可按项目精细度选择）
 
-- **generate_image 工具** — 给 AI 一张图片，模型可调用此工具生成
-- **设置页** — 配置提供商、模型、API Key
-- **聊天内渲染** — 生成的图片直接嵌入对话流
+## 架构
+- 服务端：Node.js (TypeScript)，处理图片生成和路由
+- 客户端：React (TypeScript)，插件 UI 组件
+- 协议：OpenAI 兼容协议（/v1/images/generations）
 
-## 支持的提供商
-
-| 提供商 | API | 默认模型 |
-|--------|-----|---------|
-| Google Gemini | generativelanguage.googleapis.com | gemini-3.1-flash-image |
-| OpenAI / 中转站 | api.openai.com/v1 | gpt-image-2 |
-| 字节 Seedream | ark.cn-beijing.volces.com/api/v3 | doubao-seedream-5-0-260128 |
-
-## 安装
-
-```bash
-cd ~/.dsh/profiles/web
-npm install /path/to/dsh-makemake
+## 目录结构
+```
+├── src/
+│   ├── client/          # 客户端 React 组件
+│   │   ├── index.tsx    # 插件主入口，注册 slot、工具
+│   │   └── plugin-settings.ts
+│   ├── image-route.ts   # 图片路由，存储 attachment
+│   ├── shared.ts        # 共享类型和常量
+│   └── index.ts         # 服务端入口，注册 webServer 路由
+├── lib/                 # 构建产物
+│   ├── client.js        # 客户端 bundle
+│   └── index.js         # 服务端 bundle
+├── package.json
+├── tsconfig.json
+├── tsdown.config.ts
+└── CHANGES.md
 ```
 
-或在 package.json 的 `dsh.profile.bundles` 中添加 `"dsh-makemake"`，重启 DSH。
+## 构建流程
+```bash
+# 构建
+cd /vol1/1000/DeepSeek/dsh-makemake
+npx tsc && npx tsdown -c tsdown.config.ts
 
-## 配置
+# 部署到 DSH profile
+cp -r lib/* /root/.dsh/profiles/web/node_modules/dsh-makemake/
 
-设置页 → Plugins → 图像生成，选择提供商并填写 API Key。
+# 重启 DSH
+kill $(pgrep -f "dsh.*3080")
+cd /root/.dsh/profiles/web && npx dsh --profile web --port 3080 --no-open
+```
 
-## 依赖
+## 依赖包（从 dsh-looklook 复制）
+- @deepseek-ai/dsh-api-remotes
+- dsh-host-apiproxy
+- @deepseek-ai/dsh-client-web-react
+- @deepseek-ai/schemastery
+- zod
 
-- `@deepseek-ai/dsh-attachment` — 图片附件服务
-- `@deepseek-ai/dsh-settings` — 设置持久化
-- `@deepseek-ai/dsh-tools` — 工具注册
-- `@deepseek-ai/schemastery` — 配置 schema
+## 渠道配置
+- namespace: `creation`
+- 字段：
+  - `imageChannels`: Channel[] - 出图渠道列表
+  - `selectedImageChannel`: string - 当前选中的出图渠道 ID
+  - `videoChannels`: Channel[] - 出视频渠道列表（待开发）
+  - `selectedVideoChannel`: string - 当前选中的出视频渠道 ID
 
-无额外运行时依赖。
+## 凭据管理
+- 使用 DSH 核心 API：`api.credentials.set({ ref, value })`
+- 引用格式：`MAKEMAKE_CHANNEL_<channelId>`
 
-## 与 dsh-looklook 的关系
+## 工具注册
+- 工具名：`generate_image`
+- 调用后返回附件 ID
+- 图片存储在内存 map，重启后丢失
 
-- **looklook** = 看（图片/视频/文档识别）
-- **makemake** = 做（文生图）
-- 两者互补，可独立使用
+## 图片渲染
+- 路由：`/plugins/dsh-makemake/image`
+- 支持 GET（浏览器 <img>）和 POST
+- 通过 `tool.call.toolview` slot 渲染
+
+## 注意事项
+- 图片路由地址使用 `window.location.origin` 动态获取，适配任意访问方式
+- DSH 官方禁止 `--host 0.0.0.0`，需通过 SSH 隧道或组网 IP 访问
+- attachment 存储是临时的，DSH 重启后丢失

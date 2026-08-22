@@ -13,6 +13,27 @@ export interface ImageRouteDeps {
 
 /** Serve one verified durable image reference to a same-origin browser request. */
 export async function serveImage(req: IncomingMessage, res: ServerResponse, deps: ImageRouteDeps): Promise<void> {
+  // Support both GET and POST
+  if (req.method === 'GET') {
+    // GET /plugins/dsh-makemake/image?attachmentId=xxx
+    const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
+    const attachmentId = url.searchParams.get('attachmentId')
+    if (!attachmentId) return jsonError(res, 400, 'missing-attachment-id')
+    const attachment: ImageAttachmentRef = { attachmentId, mediaType: 'image/png', bytes: 0, width: 0, height: 0 }
+    try {
+      const stored = await deps.readImage(attachment)
+      res.writeHead(200, {
+        'content-type': stored.ref.mediaType,
+        'content-length': String(stored.data.byteLength),
+        'cache-control': 'private, max-age=3600',
+        'x-content-type-options': 'nosniff',
+      })
+      res.end(stored.data)
+    } catch {
+      jsonError(res, 404, 'image-unavailable')
+    }
+    return
+  }
   if (req.method !== 'POST') return jsonError(res, 405, 'method-not-allowed')
   if (!(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) return jsonError(res, 415, 'json-required')
   const origin = req.headers.origin
