@@ -345,27 +345,36 @@ export function apply(ctx: Context, config: Config = {}): void {
         // 兼容带 /v1 和不带 /v1 的 baseURL
         const videoBase = baseURL.endsWith('/v1') ? baseURL : `${baseURL}/v1`
         try {
-          // 提交视频生成任务
-          let submitResp: Response
-          let submitAttempts = 0
-          while (true) {
+          // 提交视频生成任务——队列满自动换 Key
+          const maxKeyAttempts = Math.max(pool.size, 1) * 2
+          let submitResp: Response | null = null
+          let lastSubmitErr = ''
+          let usedKey = sk
+          for (let ki = 0; ki < maxKeyAttempts; ki++) {
+            const curSk = pool.next()
+            if (!curSk) break
+            usedKey = curSk
             submitResp = await fetch(`${videoBase}/videos`, {
               method: 'POST', redirect: 'error', signal: exec.signal,
-              headers: { authorization: `Bearer ${sk}`, 'content-type': 'application/json' },
+              headers: { authorization: `Bearer ${curSk}`, 'content-type': 'application/json' },
               body: JSON.stringify({ model: ch.model, prompt: args.prompt, duration: parseInt(duration, 10) || 5, n: 1 }),
             })
             if (submitResp.ok) break
             const text = (await submitResp.text()).slice(0, 300)
-            // 队列满不标记 Key 失效，直接换下一个 Key
+            // 队列满：换下一个 Key（不标记冷却）
             if (submitResp.status === 503 || /queue_full/i.test(text)) {
-              throw new Error(`队列满，跳过此 Key`)
+              lastSubmitErr = `队列满，Key 轮询中`
+              continue
             }
-            if (++submitAttempts >= 3) throw new Error(`提交任务失败（HTTP ${submitResp.status}）：${text}`)
+            // 其他错误：标记 Key 冷却，换下一个
+            pool.fail(curSk)
+            lastSubmitErr = `HTTP ${submitResp.status}: ${text}`
             await new Promise(r => setTimeout(r, 2000))
           }
+          if (!submitResp?.ok) throw new Error(`提交失败：${lastSubmitErr || '所有 Key 不可用'}`)
           const submitData = await submitResp.json() as { id?: string; error?: { message?: string } }
           if (submitData.error) {
-            pool.fail(sk)
+            pool.fail(usedKey)
             throw new Error(submitData.error.message ?? 'API 返回错误')
           }
           const taskId = submitData.id
@@ -378,7 +387,7 @@ export function apply(ctx: Context, config: Config = {}): void {
             await new Promise(r => setTimeout(r, 2000))
             const pollResp = await fetch(pollUrl, {
               redirect: 'error', signal: exec.signal,
-              headers: { authorization: `Bearer ${sk}` },
+              headers: { authorization: `Bearer ${usedKey}` },
             })
             if (!pollResp.ok) {
               const text = (await pollResp.text()).slice(0, 300)
