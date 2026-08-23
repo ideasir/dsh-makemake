@@ -317,7 +317,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         },
       },
       render: (_args, value) => [
-        { type: 'text', text: `🎬 已生成视频（${value.model}，时长 ${value.duration}）\n${value.prompt}\n\n👉 点击观看视频：${value.url}` },
+        { type: 'text', text: `<video controls autoplay muted loop style="max-width:100%;max-height:480px;border-radius:12px;background:#000" src="${value.url}"></video>\n\n🎬 已生成视频（${value.model}，时长 ${value.duration}）\n${value.prompt}` },
       ],
       presentationMeta: () => ({ kind: 'dsh-makemake-video' }),
     },
