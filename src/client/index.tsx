@@ -741,8 +741,15 @@ function VideoChannelPanel({
               {testResult.video && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
                   <span style={{ color: testResult.video.ok ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>{testResult.video.ok ? '✓' : '✗'}</span>
-                  <span style={{ color: 'var(--dsw-alias-label-primary)' }}>视频</span>
+                  <span style={{ color: 'var(--dsw-alias-label-primary)' }}>文生视频</span>
                   <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>POST {testResult.video.endpoint}</span>
+                </div>
+              )}
+              {testResult.videoToImage && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                  <span style={{ color: testResult.videoToImage.ok ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>{testResult.videoToImage.ok ? '✓' : '✗'}</span>
+                  <span style={{ color: 'var(--dsw-alias-label-primary)' }}>图生视频</span>
+                  <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>POST {testResult.videoToImage.endpoint}</span>
                 </div>
               )}
               {testResult.error && <div style={{ fontSize: 11, color: 'var(--dsw-alias-state-error-primary)' }}>{testResult.error}</div>}

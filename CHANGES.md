@@ -1,5 +1,44 @@
 # CHANGES.md
 
+## 2026-08-23 (晚) - 右键渠道选择 + /渠道名 命令规范
+
+### 需求背景
+主任新规范：**出图/出视频命令不再用 /make出图、/make视频 前缀，直接用渠道名**。
+- 对话框的图片/视频按钮：**左键** = 用当前选中渠道注入 `/渠道名 ` 命令；**右键** = 弹出渠道列表选择，选中后自动切换并注入 `/渠道名 ` 命令。
+- 示例：出图有两个渠道「agnes」「gpt出图通道」，命令就是 `/agnes 一只猫` 或 `/gpt出图通道 一只猫`。
+
+### 解决方案
+1. **客户端右键菜单**（`src/client/index.tsx`）：
+   - 图片/视频按钮加 `onContextMenu`（右键）→ 弹出渠道列表浮层（channel 名 + model 名 + ✓ 标记当前选中）
+   - 选中某渠道 → `scope.set('selectedImageChannel'/'selectedVideoChannel', ch.id)` 切换默认渠道 + 注入 `/渠道名 ` 命令
+   - 左键 → 注入当前选中（或第一个）渠道的 `/渠道名 ` 命令
+   - 浮层点击空白处自动关闭（mousedown listener）
+   - 依赖 `scope.subscribe` 实时同步渠道列表（设置页增删渠道后按钮菜单自动更新）
+2. **命令高亮升级**：原 `/make` 前缀高亮 → 改为**任意 `/中文/英文/数字/下划线` 开头**的命令都高亮亮蓝色（正则 `^\/[\u4e00-\u9fa5A-Za-z0-9_-]+`），解决渠道名命令颜色透明问题
+3. **系统提示词动态化**（`src/index.ts` systemPrompt.section）：
+   - `text` 从静态字符串改为**函数**，每次组装 prompt 时实时读取当前设置
+   - 生成「当前可用渠道」列表：`图片生成渠道（命令：/渠道名1 或 /渠道名2）：调用 makemake_image 工具`
+   - 模型因此知道 `/xxx` 对应哪个工具、用哪个渠道
+4. **工具 channel 参数**：
+   - `makemake_image` / `makemake_video` 增加 `channel` 参数（渠道名）
+   - execute 里按渠道名过滤：用户输入 `/渠道名` 时只用该渠道，未指定时用当前选中渠道
+
+### 踩坑记录
+- **模板字符串里不能有反引号**：skill.ts 第 10 行 `通过 \`channel\` 参数` 里的反引号直接终止了模板字符串，报 TS1005。改成普通引号。
+- **`npm run build`（tsc && tsdown）会因历史遗留类型错误失败**：webServer 类型不存在（dsh-host-webserver 0.1.1-rc.2 版本不匹配）、attachmentId 品牌类型不兼容——这些是**改动前就存在**的问题，与本次改动无关。**正确构建姿势：`npx tsc --noEmitOnError false` 生成服务端 lib + `npx tsdown` 生成客户端 lib**，两个都要跑。
+- **DSH 重启**：杀旧进程（PID 精确 kill）+ cd profiles/web 重新 npx dsh，端口 3080 正常监听。
+
+### 验证
+- `npx tsc --noEmitOnError false` → lib/index.js 更新（33KB）
+- `npx tsdown` → lib/client.js 更新（67KB）
+- DSH 重启后 127.0.0.1:3080 正常
+- 代码已推送 GitHub（commit 198c995）
+
+### 修改文件
+- `src/client/index.tsx` — 右键菜单 + 左键注入 /渠道名 + 高亮正则 + scope.subscribe 同步
+- `src/index.ts` — systemPrompt.section 动态渠道名 + 工具 channel 参数 + 渠道过滤
+- `src/skill.ts` — 调用规则更新（/渠道名 规范、channel 参数说明）
+
 ## 2026-08-23 - 图生图修复 + 渠道检测按钮 + 提示词透传
 
 ### 问题

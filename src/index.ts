@@ -144,7 +144,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         }
         const base = rawBase.replace(/\/+$/, '')
         const headers = { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }
-        const result: { ok: boolean; textToImage?: { ok: boolean; endpoint: string; detail?: string }; imageToImage?: { ok: boolean; endpoint: string; formats: string[] }; video?: { ok: boolean; endpoint: string }; error?: string } = { ok: false }
+        const result: { ok: boolean; textToImage?: { ok: boolean; endpoint: string; detail?: string }; imageToImage?: { ok: boolean; endpoint: string; formats: string[] }; video?: { ok: boolean; endpoint: string }; videoToImage?: { ok: boolean; endpoint: string }; error?: string } = { ok: false }
 
         try {
           if (type === 'image') {
@@ -207,12 +207,13 @@ export function apply(ctx: Context, config: Config = {}): void {
             result.ok = ttiOk
           } else {
             // 视频测试
-            // 尝试 /v1/videos (Agnes) 和 /videos/generations
+            const videoBase = base.endsWith('/v1') ? base : `${base}/v1`
             let videoOk = false
             let videoEndpoint = ''
+            let i2vOk = false
+            let i2vEndpoint = ''
 
-            // 先试 POST /v1/videos 看是否 404
-            const videoBase = base.endsWith('/v1') ? base : `${base}/v1`
+            // 文生视频探测：POST /v1/videos 空 body 看端点是否存在
             try {
               const vResp = await fetch(`${videoBase}/videos`, {
                 method: 'POST', redirect: 'error', headers,
@@ -226,7 +227,6 @@ export function apply(ctx: Context, config: Config = {}): void {
             } catch {}
 
             if (!videoOk) {
-              // 尝试 GET /v1/videos 看端点是否存在
               try {
                 const vGet = await fetch(`${videoBase}/videos`, { method: 'GET', redirect: 'error', headers, signal: AbortSignal.timeout(8_000) })
                 if (vGet.status !== 404) {
@@ -236,8 +236,23 @@ export function apply(ctx: Context, config: Config = {}): void {
               } catch {}
             }
 
+            // 图生视频探测：POST /v1/videos 带顶层 image 字段
+            try {
+              const tinyPngUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+              const i2vResp = await fetch(`${videoBase}/videos`, {
+                method: 'POST', redirect: 'error', headers,
+                body: JSON.stringify({ model, prompt: 'test', image: tinyPngUrl, n: 1 }),
+                signal: AbortSignal.timeout(8_000),
+              })
+              if (i2vResp.status !== 404 && i2vResp.status !== 400 && i2vResp.status !== 401 && i2vResp.status !== 403) {
+                i2vOk = true
+                i2vEndpoint = `${videoBase}/videos`
+              }
+            } catch {}
+
             result.video = { ok: videoOk, endpoint: videoEndpoint || '未检测到视频端点' }
-            result.ok = videoOk
+            result.videoToImage = { ok: i2vOk, endpoint: i2vEndpoint || '未检测到图生视频端点' }
+            result.ok = videoOk || i2vOk
           }
         } catch (e) {
           result.error = e instanceof Error ? e.message : String(e)
@@ -447,11 +462,12 @@ export function apply(ctx: Context, config: Config = {}): void {
   // ─── Video tool ────────────────────────────────────────────────────────
   ctx.tools.register(defineTool({
     name: 'makemake_video',
-    description: 'Generate one video using the Make Make configured channel. Use when the user asks to create, generate, or render a video.',
+    description: 'Generate one video using the Make Make configured channel. Use when the user asks to create, generate, or render a video. Pass "image" (URL or path) to do image-to-video (i2v) — animate a still image into a video.',
     parameters: {
       prompt: { type: 'string', required: true, description: 'Complete description of the video to generate.' },
       duration: { type: 'string', description: 'Optional video duration, e.g. "5s" or "10s".' },
       channel: { type: 'string', description: 'Optional channel name to use. When the user typed /渠道名, pass the channel name here.' },
+      image: { type: 'string', description: 'Optional reference image URL or path for image-to-video (i2v). When passed, the API animates the image into a video per the prompt.' },
     },
     output: {
       schema: {
@@ -481,6 +497,12 @@ export function apply(ctx: Context, config: Config = {}): void {
       const duration = args.duration ?? '5s'
       const lastErr: string[] = []
 
+      // 图生视频：解析参考图 URL
+      const dshUrl = new URL(`http://127.0.0.1:3080`)
+      const normalizeImageUrl = (url: string) => url.replace(/^https?:\/\/[^/]+/, dshUrl.origin)
+      const srcVideoImage = (args as { image?: string }).image?.trim()
+      const resolvedImage = srcVideoImage ? normalizeImageUrl(srcVideoImage) : undefined
+
       for (const ch of targetChannels) {
         const cred = await ctx.credentials.resolve(channelCredentialRef(ch.id))
         if (!cred?.value) { lastErr.push(`渠道「${ch.name}」未配置 API Key`); continue }
@@ -503,7 +525,9 @@ export function apply(ctx: Context, config: Config = {}): void {
             submitResp = await fetch(`${videoBase}/videos`, {
               method: 'POST', redirect: 'error', signal: exec.signal,
               headers: { authorization: `Bearer ${curSk}`, 'content-type': 'application/json' },
-              body: JSON.stringify({ model: ch.model, prompt: args.prompt, duration: parseInt(duration, 10) || 5, n: 1 }),
+              body: JSON.stringify(resolvedImage
+                ? { model: ch.model, prompt: args.prompt, image: resolvedImage, duration: parseInt(duration, 10) || 5, n: 1 }
+                : { model: ch.model, prompt: args.prompt, duration: parseInt(duration, 10) || 5, n: 1 }),
             })
             if (submitResp.ok) break
             const text = (await submitResp.text()).slice(0, 300)
