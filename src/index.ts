@@ -260,10 +260,30 @@ export function apply(ctx: Context, config: Config = {}): void {
   }, 'dsh-makemake: commands')
 
   // 注册系统提示词，让模型知道 makemake 工具
+  // 渠道名是动态的：每次组装 prompt 时从当前设置读取，让模型知道 /<渠道名> 对应哪个渠道
   ctx.systemPrompt.section({
     name: 'makemake',
     order: 220,
-    text: MAKEMAKE_SKILL,
+    text: (): string => {
+      try {
+        const s = scope.get() as unknown as RuntimeSettings
+        const imgChs = s.imageChannels ?? []
+        const vidChs = s.videoChannels ?? []
+        const imgCmdNames = imgChs.map(c => c.name).filter(Boolean)
+        const vidCmdNames = vidChs.map(c => c.name).filter(Boolean)
+        const cmdLines: string[] = []
+        if (imgCmdNames.length > 0) {
+          cmdLines.push(`图片生成渠道（命令：/${imgCmdNames.join(' 或 /')}）：调用 makemake_image 工具`)
+        }
+        if (vidCmdNames.length > 0) {
+          cmdLines.push(`视频生成渠道（命令：/${vidCmdNames.join(' 或 /')}）：调用 makemake_video 工具`)
+        }
+        if (cmdLines.length === 0) return MAKEMAKE_SKILL
+        return MAKEMAKE_SKILL + '\n\n### 当前可用渠道\n' + cmdLines.join('\n')
+      } catch {
+        return MAKEMAKE_SKILL
+      }
+    },
   })
 
   // ─── Image tool ────────────────────────────────────────────────────────
@@ -274,6 +294,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       prompt: { type: 'string', required: true, description: 'Complete description of the image to generate.' },
       size: { type: 'string', description: 'Optional image size, e.g. "1024x1024" or "2K".' },
       image: { type: 'string', description: 'Optional reference image URL or path for image-to-image (img2img). When passed, the API uses it as the source image and transforms it per the prompt.' },
+      channel: { type: 'string', description: 'Optional channel name to use. When the user typed /渠道名, pass the channel name here.' },
     },
     output: {
       schema: {
@@ -314,9 +335,16 @@ export function apply(ctx: Context, config: Config = {}): void {
 
           // 按「已选渠道优先，其次其余渠道」排序
           const selectedId = settings.selectedImageChannel
+          // 如果用户通过 /渠道名 指定了渠道，则只用该渠道
+          let targetChannels = channels
+          const channelArg = (args as { channel?: string }).channel?.trim()
+          if (channelArg) {
+            const byName = channels.filter(c => c.name === channelArg || `${c.name}`.includes(channelArg))
+            if (byName.length > 0) targetChannels = byName
+          }
           const sorted = selectedId
-            ? [...channels].sort((a, b) => (a.id === selectedId ? 0 : 1))
-            : channels
+            ? [...targetChannels].sort((a, b) => (a.id === selectedId ? 0 : 1))
+            : targetChannels
 
           const lastErr: string[] = []
           for (const ch of sorted) {
@@ -423,6 +451,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     parameters: {
       prompt: { type: 'string', required: true, description: 'Complete description of the video to generate.' },
       duration: { type: 'string', description: 'Optional video duration, e.g. "5s" or "10s".' },
+      channel: { type: 'string', description: 'Optional channel name to use. When the user typed /渠道名, pass the channel name here.' },
     },
     output: {
       schema: {
@@ -442,10 +471,17 @@ export function apply(ctx: Context, config: Config = {}): void {
       if (channels.length === 0) throw new Error('未配置视频生成渠道，请在设置页添加渠道。')
       const selectedId = settings.selectedVideoChannel
       const sorted = selectedId ? [...channels].sort((a, b) => (a.id === selectedId ? 0 : 1)) : channels
+      // 如果用户通过 /渠道名 指定了渠道，则只用该渠道
+      let targetChannels = sorted
+      const channelArg = (args as { channel?: string }).channel?.trim()
+      if (channelArg) {
+        const byName = channels.filter(c => c.name === channelArg || `${c.name}`.includes(channelArg))
+        if (byName.length > 0) targetChannels = byName
+      }
       const duration = args.duration ?? '5s'
       const lastErr: string[] = []
 
-      for (const ch of sorted) {
+      for (const ch of targetChannels) {
         const cred = await ctx.credentials.resolve(channelCredentialRef(ch.id))
         if (!cred?.value) { lastErr.push(`渠道「${ch.name}」未配置 API Key`); continue }
         const pool = getKeyPool(ch.id, cred.value)

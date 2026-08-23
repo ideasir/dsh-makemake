@@ -135,17 +135,17 @@ export function apply(ctx: Context): void {
     return () => { style.remove() }
   }, 'dsh-makemake: styles')
 
-  // 只给 /make 命令高亮亮蓝色，其他命令保持默认颜色
+  // 命令高亮：渠道名命令（/渠道名）高亮亮蓝色，其他命令保持默认颜色
   ctx.effect(() => {
     let mo: MutationObserver | null = null
     const paint = () => {
       document.querySelectorAll<HTMLElement>('mark[data-decoration="token"]').forEach(el => {
         const text = el.textContent ?? ''
-        if (text.startsWith('/make')) {
+        if (/^\/[\u4e00-\u9fa5A-Za-z0-9_-]+/.test(text)) {
           el.style.color = '#00d4ff'
           el.style.textShadow = '0 0 10px rgba(0,212,255,0.5)'
         } else {
-          // 非 /make 命令：清除内联样式，恢复 DSH 默认高亮色
+          // 非渠道命令：清除内联样式，恢复 DSH 默认高亮色
           el.style.color = ''
           el.style.textShadow = ''
         }
@@ -203,13 +203,41 @@ export function apply(ctx: Context): void {
 
 function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) {
   const [visible, setVisible] = useState(true)
+  const [settings, setSettings] = useState<MakemakeSettings>({})
+  const [contextMenu, setContextMenu] = useState<{
+    type: 'image' | 'video'
+    channels: Channel[]
+    selectedId: string
+    x: number
+    y: number
+  } | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     try {
       const v = scope.getSnapshot()
       setVisible(v.value?.enabled !== false)
+      setSettings(v.value ?? {})
     } catch { /* ignore */ }
   }, [])
-  if (!visible) return null
+  useEffect(() => {
+    return scope.subscribe(() => {
+      try {
+        const v = scope.getSnapshot()
+        setSettings(v.value ?? {})
+      } catch { /* ignore */ }
+    })
+  }, [scope])
+  useEffect(() => {
+    if (!contextMenu) return
+    const close = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setContextMenu(null)
+      }
+    }
+    window.addEventListener('mousedown', close)
+    return () => window.removeEventListener('mousedown', close)
+  }, [contextMenu])
+
   const inject = (cmd: string) => {
     const ta = document.querySelector<HTMLTextAreaElement>('textarea[data-phase]')
     if (!ta) return
@@ -218,10 +246,35 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
     nativeInput?.set?.call(ta, ta.value + cmd)
     ta.dispatchEvent(new Event('input', { bubbles: true }))
   }
+
+  const handleLeftClick = (type: 'image' | 'video') => {
+    const channels = type === 'image' ? settings.imageChannels ?? [] : settings.videoChannels ?? []
+    const selectedId = type === 'image' ? settings.selectedImageChannel : settings.selectedVideoChannel
+    const selected = channels.find(c => c.id === selectedId) ?? channels[0]
+    if (!selected) return
+    inject(`/${selected.name} `)
+  }
+
+  const handleRightClick = (e: React.MouseEvent, type: 'image' | 'video') => {
+    e.preventDefault()
+    const channels = type === 'image' ? settings.imageChannels ?? [] : settings.videoChannels ?? []
+    const selectedId = type === 'image' ? settings.selectedImageChannel : settings.selectedVideoChannel
+    if (channels.length === 0) return
+    setContextMenu({ type, channels, selectedId: selectedId ?? '', x: e.clientX, y: e.clientY })
+  }
+
+  const handleChannelSelect = async (ch: Channel) => {
+    const key = contextMenu!.type === 'image' ? 'selectedImageChannel' : 'selectedVideoChannel'
+    await scope.set(key, ch.id)
+    inject(`/${ch.name} `)
+    setContextMenu(null)
+  }
+
+  if (!visible) return null
   return (
     <>
-      <button type="button" onClick={() => inject('/make出图 ')}
-        title="点击填入出图命令"
+      <button type="button" onClick={() => handleLeftClick('image')} onContextMenu={(e) => handleRightClick(e, 'image')}
+        title="左键：用当前选中渠道出图 · 右键：选择渠道"
         style={{
           display: 'grid', placeItems: 'center', flex: 'none', width: 28, height: 28,
           border: 'none', borderRadius: 999, background: 'transparent', cursor: 'pointer',
@@ -232,8 +285,8 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
           <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>
         </svg>
       </button>
-      <button type="button" onClick={() => inject('/make视频 ')}
-        title="点击填入出视频命令"
+      <button type="button" onClick={() => handleLeftClick('video')} onContextMenu={(e) => handleRightClick(e, 'video')}
+        title="左键：用当前选中渠道出视频 · 右键：选择渠道"
         style={{
           display: 'grid', placeItems: 'center', flex: 'none', width: 28, height: 28,
           border: 'none', borderRadius: 999, background: 'transparent', cursor: 'pointer',
@@ -244,6 +297,35 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
           <rect x="2" y="4" width="14" height="16" rx="2" ry="2"/><path d="m16 8 4-2.5v13L16 16"/>
         </svg>
       </button>
+      {contextMenu && (
+        <div ref={menuRef}
+          style={{
+            position: 'fixed', left: contextMenu.x, top: contextMenu.y, zIndex: 10000,
+            minWidth: 160, background: 'var(--dsw-alias-bg-layer-3,#1e1e1e)',
+            border: '1px solid var(--dsw-alias-border-l2,#333)',
+            borderRadius: 8, padding: 4, boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+          }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--dsw-alias-label-tertiary,#999)',
+            padding: '6px 10px 4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            {contextMenu.type === 'image' ? '出图渠道' : '出视频渠道'}
+          </div>
+          {contextMenu.channels.map(ch => (
+            <button key={ch.id} type="button" onClick={() => handleChannelSelect(ch)}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px', fontSize: 13,
+                border: 'none', background: contextMenu.selectedId === ch.id ? 'color-mix(in srgb, var(--dsw-alias-brand-primary,#4c78ff) 15%, transparent)' : 'transparent',
+                color: 'var(--dsw-alias-label-primary,#fff)', borderRadius: 6, cursor: 'pointer',
+              }}>
+              <span style={{ fontWeight: contextMenu.selectedId === ch.id ? 600 : 400 }}>
+                {contextMenu.selectedId === ch.id ? '✓ ' : ''}{ch.name}
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#999)', marginLeft: 6 }}>
+                {ch.model}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
     </>
   )
 }
@@ -360,6 +442,10 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
   const startEdit = (type: 'image' | 'video', ch?: Channel) => {
     const id = ch?.id ?? `new-${Date.now()}`
     setEditing({ type, id })
+    // 编辑哪个渠道就自动选中哪个（让发亮状态跟随编辑面板）
+    if (ch?.id) {
+      void scope.set(type === 'image' ? 'selectedImageChannel' : 'selectedVideoChannel', ch.id)
+    }
     setChName(ch?.name ?? '')
     setChBaseURL(ch?.baseURL ?? '')
     setChModel(ch?.model ?? '')
