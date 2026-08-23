@@ -308,6 +308,13 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
   const [keyConfigured, setKeyConfigured] = useState(false)
   const [chPollMode, setChPollMode] = useState<'round-robin' | 'sequential'>('round-robin')
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
+  const [testState, setTestState] = useState<'idle' | 'testing' | 'done' | 'error'>('idle')
+  const [testResult, setTestResult] = useState<{
+    textToImage?: { ok: boolean; endpoint: string; detail?: string }
+    imageToImage?: { ok: boolean; endpoint: string; formats: string[] }
+    video?: { ok: boolean; endpoint: string }
+    error?: string
+  } | null>(null)
   const [imageChannels, setImageChannels] = useState<Channel[]>([])
   const [videoChannels, setVideoChannels] = useState<Channel[]>([])
   const [selectedImageChannel, setSelectedImageChannel] = useState('')
@@ -359,6 +366,9 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
     setChKey('')
     setChPollMode(ch?.pollMode ?? 'round-robin')
     setKeyConfigured(false)
+    setTestState('idle')
+    setTestResult(null)
+    setSaveMsg(null)
     if (ch) {
       void pluginSettings.describeCredentials([credentialRef(ch.id)]).then(res => {
         if (res.ok) {
@@ -406,6 +416,29 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
     const allChannels = type === 'image' ? imageChannels : videoChannels
     const current = [...allChannels]
     await scope.set(key, current.filter((ch: any) => ch.id !== id))
+  }
+
+  // 渠道检测
+  const testChannel = async () => {
+    if (!chBaseURL || !chModel || !chKey.trim()) { setSaveMsg('请先填写接口地址、模型名和 API Key'); return }
+    setTestState('testing'); setTestResult(null); setSaveMsg(null)
+    try {
+      const type = editing?.type ?? 'image'
+      const res = await fetch('/plugins/dsh-makemake/test', {
+        method: 'POST', redirect: 'error',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ type, baseURL: chBaseURL.replace(/\/+$/, ''), model: chModel, apiKey: chKey.trim().split('\n')[0] }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      setTestResult(data)
+      setTestState('done')
+      setSaveMsg(data.ok ? '检测通过 ✓' : '检测完成，部分功能不可用，见下方详情')
+    } catch (e) {
+      setTestState('error')
+      setSaveMsg(`检测失败：${e instanceof Error ? e.message : String(e)}`)
+    }
   }
 
   const inputStyle = {
@@ -460,6 +493,7 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
           startEdit={startEdit} saveChannel={saveChannel} deleteChannel={deleteChannel}
           setChName={setChName} setChBaseURL={setChBaseURL} setChModel={setChModel} setChKey={setChKey}
           setKeyConfigured={setKeyConfigured} setEditing={setEditing} saveMsg={saveMsg}
+          testChannel={testChannel} testState={testState} testResult={testResult}
         />
       )}
       {openPanel === 'video' && (
@@ -475,6 +509,7 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
           startEdit={startEdit} saveChannel={saveChannel} deleteChannel={deleteChannel}
           setChName={setChName} setChBaseURL={setChBaseURL} setChModel={setChModel} setChKey={setChKey}
           setKeyConfigured={setKeyConfigured} setEditing={setEditing} saveMsg={saveMsg}
+          testChannel={testChannel} testState={testState} testResult={testResult}
         />
       )}
     </>
@@ -486,6 +521,7 @@ function VideoChannelPanel({
   chPollMode, setChPollMode,
   inputStyle, fieldStyle, labelStyle, startEdit, saveChannel, deleteChannel,
   setChName, setChBaseURL, setChModel, setChKey, setKeyConfigured, setEditing, saveMsg,
+  testChannel, testState, testResult,
 }: any) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -569,8 +605,48 @@ function VideoChannelPanel({
               </span>
             )}
             <button onClick={() => setEditing(null)} style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent', cursor: 'pointer' }}>取消</button>
+            <button onClick={() => { void testChannel() }} disabled={testState === 'testing'}
+              style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6, border: '1px solid var(--dsw-alias-brand-primary)', background: 'transparent', color: 'var(--dsw-alias-brand-primary)', cursor: testState === 'testing' ? 'wait' : 'pointer', opacity: testState === 'testing' ? 0.6 : 1 }}>
+              {testState === 'testing' ? '检测中…' : '🔍 检测'}
+            </button>
             <button onClick={saveChannel} style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6, border: 'none', background: 'var(--dsw-alias-state-success-primary)', color: '#fff', cursor: 'pointer' }}>保存</button>
           </div>
+          {testState === 'done' && testResult && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 10, borderRadius: 8, background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l2)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>
+                {testResult.textToImage?.ok || testResult.video?.ok ? <span style={{ color: 'var(--dsw-alias-state-success-primary)' }}>✓</span> : <span style={{ color: 'var(--dsw-alias-state-error-primary)' }}>✗</span>}
+                检测成功
+              </div>
+              {testResult.textToImage && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                  <span style={{ color: testResult.textToImage.ok ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>{testResult.textToImage.ok ? '✓' : '✗'}</span>
+                  <span style={{ color: 'var(--dsw-alias-label-primary)' }}>文生图</span>
+                  <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>POST {testResult.textToImage.endpoint}</span>
+                  {testResult.textToImage.detail && (
+                    <span style={{ color: testResult.textToImage.ok ? 'var(--dsw-alias-label-caption)' : 'var(--dsw-alias-state-error-primary)', fontSize: 11 }}>({testResult.textToImage.detail})</span>
+                  )}
+                </div>
+              )}
+              {testResult.imageToImage && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                  <span style={{ color: testResult.imageToImage.ok ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>{testResult.imageToImage.ok ? '✓' : '✗'}</span>
+                  <span style={{ color: 'var(--dsw-alias-label-primary)' }}>图生图</span>
+                  <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>POST {testResult.imageToImage.endpoint}</span>
+                  {testResult.imageToImage.formats.length > 0 && (
+                    <span style={{ color: 'var(--dsw-alias-label-caption)', fontSize: 11 }}>({testResult.imageToImage.formats.join('、')})</span>
+                  )}
+                </div>
+              )}
+              {testResult.video && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                  <span style={{ color: testResult.video.ok ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>{testResult.video.ok ? '✓' : '✗'}</span>
+                  <span style={{ color: 'var(--dsw-alias-label-primary)' }}>视频</span>
+                  <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>POST {testResult.video.endpoint}</span>
+                </div>
+              )}
+              {testResult.error && <div style={{ fontSize: 11, color: 'var(--dsw-alias-state-error-primary)' }}>{testResult.error}</div>}
+            </div>
+          )}
         </div>
       )}
     </div>

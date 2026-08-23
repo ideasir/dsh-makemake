@@ -119,6 +119,128 @@ export function apply(ctx: Context, config: Config = {}): void {
     return () => {}
   }, 'dsh-makemake: image route')
 
+  // ─── 渠道检测路由 ──────────────────────────────────────────────────────
+  ctx.effect(() => {
+    ctx.webServer.register({
+      kind: 'exact', path: '/plugins/dsh-makemake/test',
+      handler: async (req, res) => {
+        // 读取请求体（Node IncomingMessage 是流）
+        const chunks: Buffer[] = []
+        for await (const chunk of req) chunks.push(chunk as Buffer)
+        const raw = Buffer.concat(chunks).toString('utf8')
+        const body = JSON.parse(raw || '{}') as {
+          type: 'image' | 'video'
+          baseURL: string; model: string; apiKey: string
+        }
+        const { type, baseURL: rawBase, model, apiKey } = body
+        const base = rawBase.replace(/\/+$/, '')
+        const headers = { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }
+        const result: { ok: boolean; textToImage?: { ok: boolean; endpoint: string; detail?: string }; imageToImage?: { ok: boolean; endpoint: string; formats: string[] }; video?: { ok: boolean; endpoint: string }; error?: string } = { ok: false }
+
+        try {
+          if (type === 'image') {
+            // ── 探测法（不真实生成，毫秒级返回）──
+            // 空参数请求：503=端点存在(缺模型)、404=端点不存在、401=Key无效
+            const probeHeaders = { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }
+
+            // 1. 文生图端点探测
+            let ttiOk = false
+            let ttiDetail = ''
+            try {
+              const p = await fetch(`${base}/images/generations`, {
+                method: 'POST', redirect: 'error', headers: probeHeaders,
+                body: JSON.stringify({}), signal: AbortSignal.timeout(8_000),
+              })
+              if (p.status === 401) { ttiDetail = 'API Key 无效' }
+              else if (p.status === 404) { ttiDetail = '端点不存在' }
+              else { ttiOk = true; ttiDetail = '端点可用' }
+            } catch { ttiDetail = '连接失败' }
+            result.textToImage = { ok: ttiOk, endpoint: `${base}/images/generations`, detail: ttiDetail }
+
+            // 2. 图生图格式探测（快速探针：故意缺 model 名，看返回码判断格式是否被接受，不等生成）
+            const img2imgFormats: string[] = []
+            let img2imgOk = false
+            const tinyPngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+
+            // 格式 A: 顶层 image 字段（OpenAI 标准）
+            try {
+              const aResp = await fetch(`${base}/images/generations`, {
+                method: 'POST', redirect: 'error', headers: probeHeaders,
+                body: JSON.stringify({ image: `data:image/png;base64,${tinyPngBase64}` }),
+                signal: AbortSignal.timeout(8_000),
+              })
+              // 非 404 = 格式被接受（400/503 表示服务器识别了 image 字段但缺其他参数）
+              if (aResp.status !== 404) { img2imgFormats.push('顶层 image 字段'); img2imgOk = true }
+            } catch {}
+
+            // 格式 B: extra_body.image 数组（Agnes 格式）
+            try {
+              const bResp = await fetch(`${base}/images/generations`, {
+                method: 'POST', redirect: 'error', headers: probeHeaders,
+                body: JSON.stringify({ extra_body: { image: [`data:image/png;base64,${tinyPngBase64}`] } }),
+                signal: AbortSignal.timeout(8_000),
+              })
+              if (bResp.status !== 404) { img2imgFormats.push('extra_body.image 数组'); img2imgOk = true }
+            } catch {}
+
+            // 格式 C: /images/edits + FormData
+            try {
+              const cForm = new FormData()
+              cForm.append('image', new Blob([Buffer.from(tinyPngBase64, 'base64')], { type: 'image/png' }), 'ref.png')
+              const cResp = await fetch(`${base}/images/edits`, {
+                method: 'POST', redirect: 'error', headers: { authorization: `Bearer ${apiKey}` }, body: cForm,
+                signal: AbortSignal.timeout(8_000),
+              })
+              if (cResp.status !== 404) { img2imgFormats.push('/images/edits'); img2imgOk = true }
+            } catch {}
+
+            result.imageToImage = { ok: img2imgOk, endpoint: `${base}/images/generations`, formats: img2imgFormats }
+            result.ok = ttiOk
+          } else {
+            // 视频测试
+            // 尝试 /v1/videos (Agnes) 和 /videos/generations
+            let videoOk = false
+            let videoEndpoint = ''
+
+            // 先试 POST /v1/videos 看是否 404
+            const videoBase = base.endsWith('/v1') ? base : `${base}/v1`
+            try {
+              const vResp = await fetch(`${videoBase}/videos`, {
+                method: 'POST', redirect: 'error', headers,
+                body: JSON.stringify({ model, prompt: 'test', n: 1 }),
+                signal: AbortSignal.timeout(8_000),
+              })
+              if (vResp.status !== 404 && vResp.status !== 400) {
+                videoOk = true
+                videoEndpoint = `${videoBase}/videos`
+              }
+            } catch {}
+
+            if (!videoOk) {
+              // 尝试 GET /v1/videos 看端点是否存在
+              try {
+                const vGet = await fetch(`${videoBase}/videos`, { method: 'GET', redirect: 'error', headers, signal: AbortSignal.timeout(8_000) })
+                if (vGet.status !== 404) {
+                  videoOk = true
+                  videoEndpoint = `${videoBase}/videos`
+                }
+              } catch {}
+            }
+
+            result.video = { ok: videoOk, endpoint: videoEndpoint || '未检测到视频端点' }
+            result.ok = videoOk
+          }
+        } catch (e) {
+          result.error = e instanceof Error ? e.message : String(e)
+        }
+
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify(result))
+      },
+    })
+    return () => {}
+  }, 'dsh-makemake: test route')
+
   // 注册命令让 DSH 识别 /make 前缀（命令名必须为英文小写）
   ctx.effect(() => {
     const commands = ctx.get('commands') as { register: (def: { name: string; description: string; handler: () => { kind: string } }) => void } | undefined
