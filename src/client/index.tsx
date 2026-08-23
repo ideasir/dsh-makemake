@@ -183,6 +183,14 @@ export function apply(ctx: Context): void {
       inject: () => ({}),
     }, ImageResultCard))
   })
+  // 视频 toolview
+  ;(['makemake_video'] as const).forEach(key => {
+    ctx.slots.inject('tool.call.toolview' as any, () => (ctx.slots.register as any)({
+      name: 'tool.call.toolview',
+      key,
+      inject: () => ({}),
+    }, VideoResultCard))
+  })
 
   // 快捷按钮
   ctx.slots.inject('conversation.input.left' as any, () => (ctx.slots.register as any)({
@@ -802,9 +810,63 @@ function ImageResultCard(props: ImageCardProps) {
     </div>
   }
 
-  // 视频结果：纯文字链接
-  if (textBlocks.length > 0) {
-    return <div style={{ padding: '8px 12px', fontSize: 13, color: 'var(--dsw-alias-label-primary)', lineHeight: 1.5, marginTop: 4 }}>{textBlocks.map((b: any) => b.text).join('')}</div>
-  }
   return null
+}
+
+function VideoResultCard(props: ImageCardProps) {
+  const block = props.block as { content?: ContentBlock[]; isError?: boolean; error?: { code?: string; message?: string } }
+  const [modalUrl, setModalUrl] = useState<string | null>(null)
+
+  if (!block?.content) return null
+  const textBlocks = block.content.filter((b: any) => b.type === 'text' && b.text)
+
+  if (block.isError) {
+    return <div style={{ padding: '8px 12px', fontSize: 13, color: 'var(--dsw-alias-state-error-primary)', background: 'var(--dsw-alias-bg-layer-3)', borderRadius: 8, marginTop: 4 }}>视频生成失败：{block.error?.message ?? '未知错误'}</div>
+  }
+
+  // 从 text 里提取视频 URL
+  const fullText = textBlocks.map((b: any) => b.text).join('\n')
+  const urlMatch = fullText.match(/https?:\/\/[^\s）)\]]+/)
+  const videoUrl = urlMatch ? urlMatch[0] : ''
+  // 提示词描述（去掉 URL 和标题行）
+  const desc = fullText
+    .replace(/https?:\/\/[^\s）)\]]+/g, '')
+    .replace(/🎬 已生成视频[^\n]*\n?/, '')
+    .trim()
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4, maxWidth: 480, alignItems: 'flex-start' }}>
+      {videoUrl ? (
+        <video
+          src={videoUrl}
+          controls
+          autoPlay
+          muted
+          loop
+          playsInline
+          onClick={() => setModalUrl(videoUrl)}
+          style={{ maxWidth: 480, maxHeight: 360, borderRadius: 8, border: '1px solid var(--dsw-alias-border-l2)', background: '#000', cursor: 'zoom-in', display: 'block' }}
+        />
+      ) : (
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1.5 }}>{fullText}</p>
+      )}
+      <div style={{ display: 'flex', gap: 5, alignItems: 'center', maxWidth: '100%', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>🎬 视频</span>
+        <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }} title={desc}>{desc || '已生成'}</span>
+        {videoUrl && (
+          <button onClick={(e) => { e.stopPropagation(); window.open(videoUrl, '_blank', 'noreferrer') }}
+            style={{ flex: 'none', fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+            onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'var(--dsw-alias-bg-layer-1)' }}
+            onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'transparent' }}>
+            新窗口打开
+          </button>
+        )}
+      </div>
+      {modalUrl && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,.82)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }} onClick={() => setModalUrl(null)}>
+          <video src={modalUrl} controls autoPlay playsInline style={{ maxWidth: '92vw', maxHeight: '88vh', borderRadius: 10 }} />
+        </div>
+      )}
+    </div>
+  )
 }

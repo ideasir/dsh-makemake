@@ -228,43 +228,59 @@ export function apply(ctx: Context, config: Config = {}): void {
                         }
 
                         if (srcImage) {
-                                                  // 解析参考图（仅支持附件 ID 或 http(s) URL；本地路径不存在时报错，不降级）
-                                                  let refBytes: Uint8Array
-                                                  let refType = 'image/png'
-                                                  const am = srcImage.match(/attachmentId=(sha256:[0-9a-f]+)/)
-                                                  if (am?.[1]) {
-                                                    const hash = am[1].replace(/^sha256:/, '')
-                                                    const fp = path.join(dshHome, 'attachments', 'v1', 'objects', hash.slice(0, 2), hash)
-                                                    refBytes = new Uint8Array(await fs.readFile(fp))
-                                                  } else if (/^https?:\/\//.test(srcImage)) {
-                                                    const r2 = await fetch(srcImage, { redirect: 'follow', signal: exec.signal })
-                                                    if (!r2.ok) throw new Error(`参考图读取失败（HTTP ${r2.status}）`)
-                                                    refBytes = new Uint8Array(await r2.arrayBuffer())
-                                                    const ct = (r2.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase() ?? ''
-                                                    if (['image/png','image/jpeg','image/webp','image/gif'].includes(ct)) refType = ct
-                                                  } else {
-                                                    // 本地路径：读不到直接报错（不降级文生图）
-                                                    refBytes = new Uint8Array(await fs.readFile(srcImage))
-                                                  }
-                                                  // 图生图：Agnes 官方文档规定图片在 extra_body.image 数组里（Data URI Base64），顶层不传 image
-                                                                            const refB64 = Buffer.from(refBytes).toString('base64')
-                                                                            const refDataUrl = `data:${refType};base64,${refB64}`
-                                                                            response = await fetch(`${baseURL}/images/generations`, {
-                                                                              method: 'POST', redirect: 'error', signal: exec.signal,
-                                                                              headers: { authorization: `Bearer ${sk}`, 'content-type': 'application/json' },
-                                                                              body: JSON.stringify({ model, prompt: args.prompt, size: resolvedSize, n: 1, extra_body: { image: [refDataUrl] } }),
-                                                                            })
-                                                                            if (!response.ok) {
-                                                                              const text = (await response.text()).slice(0, 300)
-                                                                              throw new Error(`图生图失败（HTTP ${response.status}）：${text}`)
-                                                                            }
-                                                } else {
-                                                  response = await fetch(`${baseURL}/images/generations`, {
-                                                    method: 'POST', redirect: 'error', signal: exec.signal,
-                                                    headers: { authorization: `Bearer ${sk}`, 'content-type': 'application/json' },
-                                                    body: JSON.stringify({ model, prompt: args.prompt, size: resolvedSize, n: 1 }),
-                                                  })
-                                                }
+                          // 解析参考图
+                          let refBytes: BlobPart = new Uint8Array([])
+                          let refType = 'image/png'
+                          const am = srcImage.match(/attachmentId=(sha256:[0-9a-f]+)/)
+                          if (am?.[1]) {
+                            const hash = am[1].replace(/^sha256:/, '')
+                            const fp = path.join(dshHome, 'attachments', 'v1', 'objects', hash.slice(0, 2), hash)
+                            refBytes = new Uint8Array(await fs.readFile(fp))
+                          } else if (/^https?:\/\//.test(srcImage)) {
+                            const r2 = await fetch(srcImage, { redirect: 'follow', signal: exec.signal })
+                            if (!r2.ok) throw new Error(`参考图读取失败（HTTP ${r2.status}）`)
+                            refBytes = new Uint8Array(await r2.arrayBuffer())
+                            const ct = (r2.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase() ?? ''
+                            if (['image/png','image/jpeg','image/webp','image/gif'].includes(ct)) refType = ct
+                          } else {
+                            // 不是 URL 也不是附件 ID，尝试本地文件路径；文件不存在则忽略参考图
+                            try {
+                              refBytes = new Uint8Array(await fs.readFile(srcImage))
+                            } catch {
+                              // 参考图不存在，降级为文生图
+                              response = await fetch(`${baseURL}/images/generations`, {
+                                method: 'POST', redirect: 'error', signal: exec.signal,
+                                headers: { authorization: `Bearer ${sk}`, 'content-type': 'application/json' },
+                                body: JSON.stringify({ model, prompt: args.prompt, size: resolvedSize, n: 1 }),
+                              })
+                              return await handleResponse(response)
+                            }
+                          }
+              const form = new FormData()
+              form.append('model', model)
+              form.append('prompt', args.prompt)
+              form.append('n', '1')
+              form.append('size', resolvedSize)
+              form.append('image', new Blob([refBytes], { type: refType }), 'reference.png')
+              response = await fetch(`${baseURL}/images/edits`, {
+                method: 'POST', redirect: 'error', signal: exec.signal,
+                headers: { authorization: `Bearer ${cred.value}` },
+                body: form,
+              })
+              if (!response.ok && response.status === 404) {
+                response = await fetch(`${baseURL}/images/generations`, {
+                  method: 'POST', redirect: 'error', signal: exec.signal,
+                  headers: { authorization: `Bearer ${cred.value}`, 'content-type': 'application/json' },
+                  body: JSON.stringify({ model, prompt: `[参考图片: ${srcImage}] ${args.prompt}`, size: resolvedSize, n: 1 }),
+                })
+              }
+            } else {
+              response = await fetch(`${baseURL}/images/generations`, {
+                method: 'POST', redirect: 'error', signal: exec.signal,
+                headers: { authorization: `Bearer ${cred.value}`, 'content-type': 'application/json' },
+                body: JSON.stringify({ model, prompt: args.prompt, size: resolvedSize, n: 1 }),
+              })
+            }
             return await handleResponse(response)
             } catch (e) {
               lastErr.push(`渠道「${ch.name}」(${ch.baseURL}): ${e instanceof Error ? e.message : String(e)}`)
