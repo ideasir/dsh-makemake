@@ -420,14 +420,21 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
 
   // 渠道检测
   const testChannel = async () => {
-    if (!chBaseURL || !chModel || !chKey.trim()) { setSaveMsg('请先填写接口地址、模型名和 API Key'); return }
+    if (!chBaseURL || !chModel) { setSaveMsg('请先填写接口地址和模型名'); return }
+    if (!chKey.trim() && !keyConfigured) { setSaveMsg('请先填写 API Key（或该渠道已有已保存的 Key）'); return }
     setTestState('testing'); setTestResult(null); setSaveMsg(null)
     try {
       const type = editing?.type ?? 'image'
       const res = await fetch('/plugins/dsh-makemake/test', {
         method: 'POST', redirect: 'error',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ type, baseURL: chBaseURL.replace(/\/+$/, ''), model: chModel, apiKey: chKey.trim().split('\n')[0] }),
+        body: JSON.stringify({
+          type,
+          baseURL: chBaseURL.replace(/\/+$/, ''),
+          model: chModel,
+          apiKey: chKey.trim().split('\n')[0] ?? '',
+          channelId: editing?.id ?? '',
+        }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
@@ -525,6 +532,9 @@ function VideoChannelPanel({
 }: any) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', paddingBottom: 2 }}>
+        ✓ = 当前出图使用的渠道 · ✏️ 编辑配置 · 🗑 删除
+      </div>
       {channels.length === 0 && !editing && (
         <div style={{ fontSize: 13, color: 'var(--dsw-alias-label-tertiary)', padding: '8px 0' }}>暂无渠道，点击下方按钮添加</div>
       )}
@@ -537,6 +547,11 @@ function VideoChannelPanel({
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
               {ch.name}
+              {editing?.id === ch.id && (
+                <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--dsw-alias-brand-primary)', background: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--dsw-alias-brand-primary) 40%, transparent)', borderRadius: 999, padding: '0 6px', lineHeight: '18px' }}>
+                  编辑中
+                </span>
+              )}
               {ch.keyCount > 0 && (
                 <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--dsw-alias-label-tertiary)', background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 999, padding: '0 6px', lineHeight: '18px' }}>
                   {ch.keyCount} Key

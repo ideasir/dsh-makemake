@@ -130,9 +130,18 @@ export function apply(ctx: Context, config: Config = {}): void {
         const raw = Buffer.concat(chunks).toString('utf8')
         const body = JSON.parse(raw || '{}') as {
           type: 'image' | 'video'
-          baseURL: string; model: string; apiKey: string
+          baseURL: string; model: string; apiKey: string; channelId?: string
         }
-        const { type, baseURL: rawBase, model, apiKey } = body
+        const { type, baseURL: rawBase, model, apiKey: rawApiKey, channelId } = body
+        // 如果前端没传 Key，尝试从凭据库取
+        let apiKey = rawApiKey
+        if (!apiKey && channelId) {
+          const cred = await ctx.credentials.resolve(channelCredentialRef(channelId)).catch(() => null)
+          if (cred?.value) {
+            // 取第一个 Key（多 Key 时取第一个）
+            apiKey = cred.value.split(/[\n\r,;]+/)[0]?.trim() ?? ''
+          }
+        }
         const base = rawBase.replace(/\/+$/, '')
         const headers = { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }
         const result: { ok: boolean; textToImage?: { ok: boolean; endpoint: string; detail?: string }; imageToImage?: { ok: boolean; endpoint: string; formats: string[] }; video?: { ok: boolean; endpoint: string }; error?: string } = { ok: false }
@@ -169,8 +178,8 @@ export function apply(ctx: Context, config: Config = {}): void {
                 body: JSON.stringify({ image: `data:image/png;base64,${tinyPngBase64}` }),
                 signal: AbortSignal.timeout(8_000),
               })
-              // 非 404 = 格式被接受（400/503 表示服务器识别了 image 字段但缺其他参数）
-              if (aResp.status !== 404) { img2imgFormats.push('顶层 image 字段'); img2imgOk = true }
+              // 非 404/401/403 = 格式被接受（400/503 表示服务器识别了 image 字段但缺其他参数）
+              if (aResp.status !== 404 && aResp.status !== 401 && aResp.status !== 403) { img2imgFormats.push('顶层 image 字段'); img2imgOk = true }
             } catch {}
 
             // 格式 B: extra_body.image 数组（Agnes 格式）
@@ -180,7 +189,7 @@ export function apply(ctx: Context, config: Config = {}): void {
                 body: JSON.stringify({ extra_body: { image: [`data:image/png;base64,${tinyPngBase64}`] } }),
                 signal: AbortSignal.timeout(8_000),
               })
-              if (bResp.status !== 404) { img2imgFormats.push('extra_body.image 数组'); img2imgOk = true }
+              if (bResp.status !== 404 && bResp.status !== 401 && bResp.status !== 403) { img2imgFormats.push('extra_body.image 数组'); img2imgOk = true }
             } catch {}
 
             // 格式 C: /images/edits + FormData
@@ -191,7 +200,7 @@ export function apply(ctx: Context, config: Config = {}): void {
                 method: 'POST', redirect: 'error', headers: { authorization: `Bearer ${apiKey}` }, body: cForm,
                 signal: AbortSignal.timeout(8_000),
               })
-              if (cResp.status !== 404) { img2imgFormats.push('/images/edits'); img2imgOk = true }
+              if (cResp.status !== 404 && cResp.status !== 401 && cResp.status !== 403) { img2imgFormats.push('/images/edits'); img2imgOk = true }
             } catch {}
 
             result.imageToImage = { ok: img2imgOk, endpoint: `${base}/images/generations`, formats: img2imgFormats }
