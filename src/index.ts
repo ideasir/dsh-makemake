@@ -14,17 +14,9 @@ import { CREATION_NAMESPACE } from './shared.js'
 import { MAKEMAKESKILL } from './skill.js'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import * as crypto from 'node:crypto'
 
-/** 图生图迭代计数：跟踪上一轮图生图的输出图内容指纹 */
-let lastOutputFingerprint: string | null = null
-let lastImg2imgCount = 0
-
-/** 图片内容指纹：字节数 + 首 4KB hash（同一张图无论存成什么文件名，指纹一致） */
-function imageFingerprint(data: Uint8Array): string {
-  const head = data.slice(0, 4096)
-  return `${data.byteLength}-${crypto.createHash('sha256').update(head).digest('hex').slice(0, 16)}`
-}
+/** 图生图迭代计数：连续图生图累加，文生图归零 */
+let img2imgCount = 0
 
 export { Config } from './config.js'
 export { IMAGE_ROUTE } from './shared.js'
@@ -514,13 +506,15 @@ export function apply(ctx: Context, config: Config = {}): void {
           const dshUrl = new URL(`http://127.0.0.1:3080`)
           const normalizeImageUrl = (url: string) => url.replace(/^https?:\/\/[^/]+/, dshUrl.origin)
           const normalizedSrcImage = normalizeImageUrl(srcImage)
-          // 识别图生图：传了参考图（attachmentId / URL / 本地路径）即为图生图
-          // 迭代计数规则（内容指纹比对，与文件名/引用方式无关）：
-          // 参考图内容 == 上一轮图生图的输出 → 迭代链继续，+1
-          // 参考图内容不同（用户新上传的图 / 别的来源）→ 新链起点 ×1
-          // 覆盖所有场景：点「引用此图」、模型自动找上一张、用户手动保存再上传同一张图
+          // 识别图生图：有 image 参数 = 图生图，无 = 文生图
           const isImg2Img = !!normalizedSrcImage
           let iteration = 0
+          if (isImg2Img) {
+            img2imgCount += 1
+            iteration = img2imgCount
+          } else {
+            img2imgCount = 0
+          }
 
           // 纯透传：只使用当前选定的渠道，绝不遍历其他渠道
           const selectedId = settings.selectedImageChannel
@@ -572,11 +566,6 @@ export function apply(ctx: Context, config: Config = {}): void {
                           if (data.byteLength > maxBytes) throw new Error(`图片超出 ${maxBytes} 字节限制`)
                           if (!ctx.attachments.imageLimits.mediaTypes.includes(mediaType)) throw new Error(`不支持 ${mediaType} 格式`)
                           const attachment = await ctx.attachments.saveImage({ data, mediaType, name: 'generated-image' })
-                          // 迭代记账（内部变量，不进工具输出）：本轮输出图指纹，供下一轮参考图比对
-                          if (isImg2Img) {
-                            lastOutputFingerprint = imageFingerprint(data)
-                            lastImg2imgCount = iteration
-                          }
                           return { attachment, model, output: resolvedSize, prompt: args.prompt, channelName: ch.name, fileSize: data.byteLength, iteration }
                         }
 
@@ -610,12 +599,6 @@ export function apply(ctx: Context, config: Config = {}): void {
                                                     }
                                                     if (!refBytes) throw (lastImgErr instanceof Error ? lastImgErr : new Error('找不到图片文件'))
                                                   }
-                                                  // 迭代计数：参考图内容 == 上一轮输出 → 链继续 +1；不同 → 新链 ×1
-                                                  // 用内容指纹（字节数+首4KB hash），与文件名/引用方式无关
-                                                  const refFingerprint = imageFingerprint(refBytes)
-                                                  iteration = lastOutputFingerprint && refFingerprint === lastOutputFingerprint
-                                                    ? lastImg2imgCount + 1
-                                                    : 1
                                                   // 图生图：Agnes 官方文档规定图片在 extra_body.image 数组里（Data URI Base64），顶层不传 image
                                                                             const refB64 = Buffer.from(refBytes).toString('base64')
                                                                             const refDataUrl = `data:${refType};base64,${refB64}`
@@ -636,7 +619,6 @@ export function apply(ctx: Context, config: Config = {}): void {
                                                   })
                                                 }
             // 生成成功后才消费 activeMode（handleResponse 可能抛错，失败时保留给重试）
-            // 迭代计数已在 handleResponse 成功路径内更新（失败抛错不会走到，不消耗）
             const result = await handleResponse(response)
             void scope.update({ activeMode: null }).catch(() => {})
             return result
