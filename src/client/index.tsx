@@ -302,14 +302,10 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
       if (!activeBadge) return
       e.stopPropagation()
       e.preventDefault()
-      // 注入前缀
+      // 注入前缀：直接改 textarea 值，不 preventDefault（让原 Enter 自然发送）
       const prefix = activeBadge === 'image' ? '出图：' : '出视频：'
-      const currentText = ta.value
-      ta.value = prefix + currentText
-      // 触发真正发送
-      setTimeout(() => {
-        ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }))
-      }, 0)
+      ta.value = prefix + ta.value
+      activeBadge = null
       // 不自动清理 activeMode——execute 端消费后清空。
       // 如果模型没调工具，用户打下一条消息时会自动清空（见下方兜底检测）。
     }
@@ -1093,13 +1089,9 @@ function ImageResultCard(props: ImageCardProps) {
                       <path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
                     </svg>
                   </button>
-                  {/* 分辨率 */}
+                  {/* 分辨率 + 大小 */}
                   <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                    {att.width}×{att.height}
-                  </span>
-                  {/* 大小 */}
-                  <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', whiteSpace: 'nowrap' }}>
-                    {(att.bytes / 1024).toFixed(0)} KB
+                    {att.width}×{att.height} · {(att.bytes / 1024).toFixed(0)} KB
                   </span>
                   {/* 提示词 */}
                   {prompt && (
@@ -1107,14 +1099,14 @@ function ImageResultCard(props: ImageCardProps) {
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, cursor: 'default' }}
                       title={prompt}>{prompt}</span>
                   )}
-                  {/* 复制提示词 */}
+                  {/* 复制 */}
                   <button onClick={(e) => { e.stopPropagation(); void navigator.clipboard.writeText(prompt) }}
                     style={{ flex: 'none', fontSize: 11, padding: '2px 8px', borderRadius: 4,
                       border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent',
                       color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
                     onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'var(--dsw-alias-bg-layer-1)' }}
                     onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'transparent' }}>
-                    复制提示词
+                    📋
                   </button>
                 </div>
               )}

@@ -465,10 +465,9 @@ export function apply(ctx: Context, config: Config = {}): void {
         },
       },
       render: (_args, value) => {
-        const sizeLabel = value.fileSize < 1024 ? `${value.fileSize} B` : value.fileSize < 1048576 ? `${(value.fileSize / 1024).toFixed(0)} KB` : `${(value.fileSize / 1048576).toFixed(1)} MB`
         return [
           { type: 'image', attachment: value.attachment },
-          { type: 'text', text: `${value.output.replace('x', '×')} · ${sizeLabel} · ${value.channelName ?? ''}\n${value.prompt}` },
+          { type: 'text', text: `${value.channelName ?? ''} · ${value.prompt}` },
         ]
       },
       presentationMeta: (args, value) => ({
