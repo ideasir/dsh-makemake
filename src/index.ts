@@ -546,7 +546,7 @@ export function apply(ctx: Context, config: Config = {}): void {
                         let response: Response
                         try {
                           // 抽取响应处理逻辑，避免代码重复
-                        async function handleResponse(r: Response): Promise<{ attachment: ImageAttachmentRef; model: string; output: string; prompt: string; channelName: string; fileSize: number; iteration?: number; fingerprint: string }> {
+                        async function handleResponse(r: Response): Promise<{ attachment: ImageAttachmentRef; model: string; output: string; prompt: string; channelName: string; fileSize: number; iteration?: number }> {
                           let data: Uint8Array
                           let mediaType: ImageAttachmentRef['mediaType'] = 'image/png'
                           if (!r.ok) {
@@ -572,7 +572,12 @@ export function apply(ctx: Context, config: Config = {}): void {
                           if (data.byteLength > maxBytes) throw new Error(`图片超出 ${maxBytes} 字节限制`)
                           if (!ctx.attachments.imageLimits.mediaTypes.includes(mediaType)) throw new Error(`不支持 ${mediaType} 格式`)
                           const attachment = await ctx.attachments.saveImage({ data, mediaType, name: 'generated-image' })
-                          return { attachment, model, output: resolvedSize, prompt: args.prompt, channelName: ch.name, fileSize: data.byteLength, iteration, fingerprint: imageFingerprint(data) }
+                          // 迭代记账（内部变量，不进工具输出）：本轮输出图指纹，供下一轮参考图比对
+                          if (isImg2Img) {
+                            lastOutputFingerprint = imageFingerprint(data)
+                            lastImg2imgCount = iteration
+                          }
+                          return { attachment, model, output: resolvedSize, prompt: args.prompt, channelName: ch.name, fileSize: data.byteLength, iteration }
                         }
 
                         if (normalizedSrcImage) {
@@ -631,14 +636,9 @@ export function apply(ctx: Context, config: Config = {}): void {
                                                   })
                                                 }
             // 生成成功后才消费 activeMode（handleResponse 可能抛错，失败时保留给重试）
+            // 迭代计数已在 handleResponse 成功路径内更新（失败抛错不会走到，不消耗）
             const result = await handleResponse(response)
             void scope.update({ activeMode: null }).catch(() => {})
-            // 更新迭代计数：成功才更新，失败不消耗（模型重试仍可继续）
-            if (isImg2Img && result.attachment) {
-              // 记录本轮输出图指纹，下一轮参考图与它比对
-              lastOutputFingerprint = result.fingerprint
-              lastImg2imgCount = iteration
-            }
             return result
             } catch (e) {
               // 失败：保留 activeMode（模型可重试），不消费
