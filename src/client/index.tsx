@@ -300,11 +300,18 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
       const ta = taSel()
       if (!ta || document.activeElement !== ta) return
       if (!activeBadge) return
-      // 注入前缀：在捕获阶段修改 textarea 的值，然后让事件自然冒泡到 DSH 的发送逻辑
+      // 注入前缀：用 React 受控组件的 setter，让 DSH 内部 state 也更新为带前缀的值
       const prefix = activeBadge === 'image' ? '出图：' : '出视频：'
+      // 方法1：直接赋值（简单但不一定能触发 React）
       ta.value = prefix + ta.value
+      // 方法2：触发 input 事件，让 React 的 onChange 感知更新
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set
+      if (nativeInputValueSetter) {
+        nativeInputValueSetter.call(ta, prefix + ta.value)
+        ta.dispatchEvent(new Event('input', { bubbles: true }))
+      }
       activeBadge = null
-      // 不阻止默认行为，DSH 在冒泡阶段读到的是已注入前缀的值
+      // 不阻止默认行为，让原 Enter 携带已修改的值发送
       // 如果模型没调工具，用户打下一条消息时会自动清空（见下方兜底检测）。
     }
 
