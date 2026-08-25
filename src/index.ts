@@ -529,6 +529,8 @@ export function apply(ctx: Context, config: Config = {}): void {
                         try {
                           // 抽取响应处理逻辑，避免代码重复
                         async function handleResponse(r: Response): Promise<{ attachment: ImageAttachmentRef; model: string; output: string; prompt: string; channelName: string; fileSize: number }> {
+                          let data: Uint8Array
+                          let mediaType: ImageAttachmentRef['mediaType'] = 'image/png'
                           if (!r.ok) {
                                       const text = (await r.text()).slice(0, 300)
                                       throw new Error(`HTTP ${r.status}: ${text}`)

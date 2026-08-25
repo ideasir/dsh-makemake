@@ -36,7 +36,8 @@ interface MakemakeSettings {
 // 图片/视频互斥：'image' | 'video' | null
 let activeBadge: 'image' | 'video' | null = null
 // 已发送消息的激活模式队列：Enter 发送时推入，气泡节点出现后注册到持久化映射表
-let sentModesQueue: Array<'image' | 'video'> = []
+// 格式：{ mode, channelName } — channelName 来自选中的渠道名
+let sentModesQueue: Array<{ mode: 'image' | 'video'; channelName: string }> = []
 
 interface SettingsFace {
   scope: SettingsScope<MakemakeSettings>
@@ -256,76 +257,42 @@ export function apply(ctx: Context): void {
       style.dataset.plugin = 'dsh-makemake-msg-icon'
       style.textContent = `
   [data-chat-flow-kind="user"]{position:relative}
-  [data-chat-flow-kind="user"] .dsh-mm-msg-icon{position:absolute;z-index:5;pointer-events:none;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:#00E5FF;opacity:.8;left:-9999px;top:-9999px}
+  [data-chat-flow-kind="user"] .dsh-mm-msg-label{position:absolute;z-index:5;pointer-events:none;font-size:11px;font-weight:500;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2,#2c2c2e);border:1px solid var(--dsw-alias-border-l2,#444);border-radius:4px;padding:0 5px;line-height:16px;white-space:nowrap;top:-8px;right:-8px}
   `
       document.head.appendChild(style)
 
-      const imageSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>'
-      const videoSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="14" height="16" rx="2" ry="2"/><path d="m16 8 4-2.5v13L16 16"/></svg>'
-
-      // 持久化 key→mode 映射表（localStorage，刷新后恢复）
+      // 持久化 key→channel name 映射表（localStorage，刷新后恢复）
       const STORAGE_KEY = 'dsh-mm-msg-icon-map'
-      let iconMap: Record<string, 'image' | 'video'> = (() => {
+      let iconMap: Record<string, string> = (() => {
         try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') } catch { return {} }
       })()
       const persist = () => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(iconMap)) } catch { /* ignore */ } }
 
-      // 计算气泡真实左边沿
-      const bubbleLeftOf = (node: HTMLElement): { left: number; top: number; height: number } | null => {
-        const flowRect = node.getBoundingClientRect()
-        let minLeft = Infinity
-        let top = 0
-        let height = 0
-        const all = node.querySelectorAll('*')
-        for (const el of all) {
-          const e = el as HTMLElement
-          if (e.classList.contains('dsh-mm-msg-icon')) continue
-          const r = e.getBoundingClientRect()
-          if (r.width <= 0 || r.height <= 0) continue
-          const isLeaf = e.children.length === 0 && (e.textContent ?? '').trim().length > 0
-          const hasImg = e.tagName === 'IMG' || !!e.querySelector('img')
-          if (!isLeaf && !hasImg) continue
-          if (r.left < minLeft) {
-            minLeft = r.left; top = r.top; height = r.height
-          }
-        }
-        if (minLeft === Infinity) return null
-        return { left: minLeft - flowRect.left, top: top - flowRect.top, height }
-      }
-
       const tick = () => {
         const nodes = Array.from(document.querySelectorAll<HTMLElement>('[data-chat-flow-kind="user"]'))
-        // 新节点（不在映射表、队列有值）→ 分配模式并持久化
+        // 新节点（不在映射表、队列有值）→ 分配标签并持久化
         for (const node of nodes) {
           const key = node.dataset.chatAnchorKey ?? ''
           if (!key || iconMap[key]) continue
-          const mode = sentModesQueue.shift()
-          if (!mode) continue
-          iconMap[key] = mode
+          const item = sentModesQueue.shift()
+          if (!item) continue
+          iconMap[key] = item.channelName
           persist()
         }
-        // 渲染图标：从持久化映射表读取模式
+        // 渲染标签：从持久化映射表读取 channel name
         for (const node of nodes) {
           const key = node.dataset.chatAnchorKey ?? ''
           if (!key) continue
-          const mode = iconMap[key]
-          if (!mode) continue
-          // 已有图标 → 更新位置
-          let icon = node.querySelector<HTMLElement>('.dsh-mm-msg-icon')
-          if (!icon) {
-            icon = document.createElement('div')
-            icon.className = 'dsh-mm-msg-icon'
-            icon.innerHTML = mode === 'image' ? imageSvg : videoSvg
-            node.appendChild(icon)
+          const channelName = iconMap[key]
+          if (!channelName) continue
+          // 已有标签 → 更新文本
+          let label = node.querySelector<HTMLElement>('.dsh-mm-msg-label')
+          if (!label) {
+            label = document.createElement('span')
+            label.className = 'dsh-mm-msg-label'
+            node.appendChild(label)
           }
-          // 动态定位：图标贴气泡右边缘，顶部对齐气泡最上边
-          // 用户气泡通常在 flowItem 右半区，用 right 定位贴右侧
-          const pos = bubbleLeftOf(node)
-          if (pos) {
-            icon.style.right = '-4px'
-            icon.style.top = `${pos.top}px`
-            icon.style.left = 'auto'
-          }
+          label.textContent = channelName
         }
         // 清理：只清理极端不存在的 key（保留映射，虚拟滚动卸载节点后图标可重建）
         // 注意：不能删！DSH 消息列表虚拟滚动会临时卸载节点，activeKeys 会变少，
@@ -375,11 +342,13 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
   }, [contextMenu])
 
   // 发送时：渠道信息不进消息文本，只清空徽章。渠道由 selected 状态 + 工具调用传递。
+  // 当前渠道名（气泡标签用）：image → selectedImageChannel 对应 name，video → selectedVideoChannel 对应 name
+  let lastChannelName: Record<'image' | 'video', string> = { image: '', video: '' }
   useEffect(() => {
     if (!visible) return
     const taSel = () => document.querySelector<HTMLTextAreaElement>('textarea[data-phase]')
 
-    // 1) Enter 发送：不改消息文本（气泡显示纯净提示词），只记录模式供图标 + 保留 activeMode
+    // 1) Enter 发送：不改消息文本（气泡显示纯净提示词），只记录模式供标签 + 保留 activeMode
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return
       const ta = taSel()
@@ -387,8 +356,12 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
       if (!activeBadge) return
       e.stopPropagation()
       e.preventDefault()
-      // 记录本次发送的激活模式（气泡图标用）
-      sentModesQueue.push(activeBadge)
+      // 记录本次发送的激活模式 + 渠道名（气泡标签用）
+      const chs = activeBadge === 'image' ? (settings.imageChannels ?? []) : (settings.videoChannels ?? [])
+      const selId = activeBadge === 'image' ? settings.selectedImageChannel : settings.selectedVideoChannel
+      const chName = chs.find(c => c.id === selId)?.name ?? chs[0]?.name ?? ''
+      if (chName) lastChannelName[activeBadge] = chName
+      sentModesQueue.push({ mode: activeBadge, channelName: chName || (activeBadge === 'image' ? '图片' : '视频') })
       // 不注入任何文字进消息——"出图/出视频"由服务端 systemPrompt 注入（模型可见，前端不显示）
       activeBadge = null
       // 触发真正发送（activeMode 保留在 scope，服务端 systemPrompt 读取后消费）
@@ -400,7 +373,7 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
     }
 
     // 2) 兜底：无论用哪种方式发送（Enter 或点发送按钮），消息发出后输入框清空
-    // → 若仍有激活模式，注册到图标队列 + 清空徽章
+    // → 若仍有激活模式，注册到标签队列 + 清空徽章
     let prev = ''
     const iv = setInterval(() => {
       const ta = taSel()
@@ -408,7 +381,11 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
       const v = ta.value
       if (prev !== '' && v === '' && activeBadge) {
         // Enter 拦截器已 push 并清空，不会重复；点按钮发送时这里补注册
-        sentModesQueue.push(activeBadge)
+        const chs = activeBadge === 'image' ? (settings.imageChannels ?? []) : (settings.videoChannels ?? [])
+        const selId = activeBadge === 'image' ? settings.selectedImageChannel : settings.selectedVideoChannel
+        const chName = chs.find(c => c.id === selId)?.name ?? chs[0]?.name ?? ''
+        if (chName) lastChannelName[activeBadge] = chName
+        sentModesQueue.push({ mode: activeBadge, channelName: chName || (activeBadge === 'image' ? '图片' : '视频') })
         activeBadge = null
       }
       prev = v
