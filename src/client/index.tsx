@@ -300,13 +300,11 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
       const ta = taSel()
       if (!ta || document.activeElement !== ta) return
       if (!activeBadge) return
-      e.stopPropagation()
-      e.preventDefault()
-      // 注入前缀：直接改 textarea 值，不 preventDefault（让原 Enter 自然发送）
+      // 注入前缀：在捕获阶段修改 textarea 的值，然后让事件自然冒泡到 DSH 的发送逻辑
       const prefix = activeBadge === 'image' ? '出图：' : '出视频：'
       ta.value = prefix + ta.value
       activeBadge = null
-      // 不自动清理 activeMode——execute 端消费后清空。
+      // 不阻止默认行为，DSH 在冒泡阶段读到的是已注入前缀的值
       // 如果模型没调工具，用户打下一条消息时会自动清空（见下方兜底检测）。
     }
 
@@ -1101,12 +1099,14 @@ function ImageResultCard(props: ImageCardProps) {
                   )}
                   {/* 复制 */}
                   <button onClick={(e) => { e.stopPropagation(); void navigator.clipboard.writeText(prompt) }}
-                    style={{ flex: 'none', fontSize: 11, padding: '2px 8px', borderRadius: 4,
-                      border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent',
-                      color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                    onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'var(--dsw-alias-bg-layer-1)' }}
+                    style={{ flex: 'none', width: 26, height: 26, borderRadius: 6, border: 'none',
+                      background: 'transparent', cursor: 'pointer', display: 'grid', placeItems: 'center',
+                      color: 'var(--dsw-alias-label-tertiary)', transition: 'background .12s' }}
+                    onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'var(--dsw-alias-bg-hover)' }}
                     onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'transparent' }}>
-                    📋
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                    </svg>
                   </button>
                 </div>
               )}
