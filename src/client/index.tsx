@@ -300,15 +300,19 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
       const ta = taSel()
       if (!ta || document.activeElement !== ta) return
       if (!activeBadge) return
-      // 注入前缀：用 React 受控组件的 setter，让 DSH 内部 state 也更新为带前缀的值
+      // 注入前缀：只加一次，先检查是否已有前缀，避免重复
       const prefix = activeBadge === 'image' ? '出图：' : '出视频：'
-      // 方法1：直接赋值（简单但不一定能触发 React）
-      ta.value = prefix + ta.value
-      // 方法2：触发 input 事件，让 React 的 onChange 感知更新
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set
-      if (nativeInputValueSetter) {
-        nativeInputValueSetter.call(ta, prefix + ta.value)
-        ta.dispatchEvent(new Event('input', { bubbles: true }))
+      const cur = ta.value
+      // 已带前缀（用户手动输入过）则不重复加
+      if (!cur.startsWith(prefix)) {
+        // 用 React 受控组件的 setter 更新值 + 触发 input 事件
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set
+        if (nativeInputValueSetter) {
+          nativeInputValueSetter.call(ta, prefix + cur)
+          ta.dispatchEvent(new Event('input', { bubbles: true }))
+        } else {
+          ta.value = prefix + cur
+        }
       }
       activeBadge = null
       // 不阻止默认行为，让原 Enter 携带已修改的值发送
@@ -1052,7 +1056,22 @@ function ImageResultCard(props: ImageCardProps) {
   }
 
   if (imageBlocks.length > 0) {
-    return <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4, width: '100%' }}>
+    const copyPrompt = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      // fallback：非 HTTPS 环境（SSH 隧道 localhost）clipboard API 不可用
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.cssText = 'position:fixed;left:-9999px'
+      document.body.appendChild(ta)
+      ta.select()
+      try { document.execCommand('copy') } catch { /* ignore */ }
+      document.body.removeChild(ta)
+    }
+  }
+
+  return <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4, width: '100%' }}>
       {imageBlocks.map((b: any, i: number) => {
         const att = b.attachment
         const url = `${window.location.origin}/plugins/dsh-makemake/image?attachmentId=${att?.attachmentId}`
@@ -1098,23 +1117,26 @@ function ImageResultCard(props: ImageCardProps) {
                   <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>
                     {att.width}×{att.height} · {(att.bytes / 1024).toFixed(0)} KB
                   </span>
-                  {/* 提示词 */}
-                  {prompt && (
-                    <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', flex: 1,
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, cursor: 'default' }}
-                      title={prompt}>{prompt}</span>
-                  )}
-                  {/* 复制 */}
-                  <button onClick={(e) => { e.stopPropagation(); void navigator.clipboard.writeText(prompt) }}
-                    style={{ flex: 'none', width: 26, height: 26, borderRadius: 6, border: 'none',
-                      background: 'transparent', cursor: 'pointer', display: 'grid', placeItems: 'center',
-                      color: 'var(--dsw-alias-label-tertiary)', transition: 'background .12s' }}
-                    onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'var(--dsw-alias-bg-hover)' }}
-                    onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'transparent' }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                    </svg>
-                  </button>
+                  {/* 提示词 + 复制（同一行） */}
+                  <div style={{ display: 'flex', gap: 5, alignItems: 'center', flex: 1, minWidth: 0, maxWidth: 350 }}>
+                    {prompt && (
+                      <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', flex: 1,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, cursor: 'default' }}
+                        title={prompt}>{prompt}</span>
+                    )}
+                    {/* 复制 */}
+                    <button onClick={(e) => { e.stopPropagation(); void copyPrompt(prompt) }}
+                      style={{ flex: 'none', width: 22, height: 22, borderRadius: 5, border: 'none',
+                        background: 'transparent', cursor: 'pointer', display: 'grid', placeItems: 'center',
+                        color: 'var(--dsw-alias-label-tertiary)', transition: 'background .12s', padding: 0 }}
+                      onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'var(--dsw-alias-bg-hover)'; (e.target as HTMLButtonElement).style.color = 'var(--dsw-alias-label-primary)' }}
+                      onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'transparent'; (e.target as HTMLButtonElement).style.color = 'var(--dsw-alias-label-tertiary)' }}
+                      title="复制提示词">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                      </svg>
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
