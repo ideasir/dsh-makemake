@@ -1043,11 +1043,20 @@ function ImageResultCard(props: ImageCardProps) {
   const textBlocks = block.content.filter((b: any) => b.type === 'text' && b.text)
 
   let prompt = ''
+  let channelLabel = ''
   for (const tb of textBlocks) {
-    const t = tb.text
-    if (t && /已生成图片|已生成视频/.test(t)) {
+    const t = tb.text ?? ''
+    if (!t.trim()) continue
+    // render() 输出：`渠道名 · 提示词`（或旧格式 `已生成图片：xxx`）
+    if (/已生成图片|已生成视频/.test(t)) {
       const match = t.match(/：(.+)$/)
       if (match && match[1]) prompt = match[1]
+    } else if (t.includes('·')) {
+      const parts = t.split('·')
+      channelLabel = (parts[0] ?? '').trim()
+      prompt = parts.slice(1).join('·').trim()
+    } else {
+      prompt = t.trim()
     }
   }
 
@@ -1088,7 +1097,6 @@ function ImageResultCard(props: ImageCardProps) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxWidth: 350, alignItems: 'flex-start', alignSelf: 'flex-start' }}>
               {att && (
                 <div style={{ display: 'flex', gap: 5, alignItems: 'center', maxWidth: '100%', flexWrap: 'nowrap' }}>
-                  {/* 引用 + 尺寸 + 提示词 + 复制（全部一行） */}
                   {/* 引用按钮 */}
                   <button onClick={async (e) => {
                     e.stopPropagation()
@@ -1119,12 +1127,17 @@ function ImageResultCard(props: ImageCardProps) {
                     {att.width}×{att.height} · {(att.bytes / 1024).toFixed(0)} KB
                   </span>
                   {/* 渠道名 + 提示词 */}
+                  {channelLabel && (
+                    <span style={{ fontSize: 10, color: 'var(--dsw-alias-label-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                      {channelLabel}
+                    </span>
+                  )}
                   {prompt && (
                     <span style={{ fontSize: 10, color: 'var(--dsw-alias-label-tertiary)', flex: 1,
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, cursor: 'default' }}
                       title={prompt}>{prompt}</span>
                   )}
-                  {/* 复制 */}
+                  {/* 复制（紧跟提示词） */}
                   <button id={`copy-btn-${i}`} onClick={(e) => {
                     e.stopPropagation()
                     const btn = e.currentTarget
@@ -1153,7 +1166,7 @@ function ImageResultCard(props: ImageCardProps) {
           </div>
         )
       })}
-      {textBlocks.length > 0 && !prompt && <p style={{ margin: 0, fontSize: 13, color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1.5 }}>{textBlocks.map((b: any) => b.text).join('')}</p>}
+      {textBlocks.length > 0 && imageBlocks.length === 0 && <p style={{ margin: 0, fontSize: 13, color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1.5 }}>{textBlocks.map((b: any) => b.text).join('')}</p>}
       {modalUrl && (
         <div className={`dsh-mm-modal ${dragging ? 'dragging' : ''} ${closing ? 'closing' : ''}`} onClick={closeModal}>
           <button className="dsh-mm-modal-close" onClick={closeModal}><LucideX size={18} /></button>
