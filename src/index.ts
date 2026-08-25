@@ -618,12 +618,10 @@ export function apply(ctx: Context, config: Config = {}): void {
               lastErr.push(`渠道「${ch.name}」(${ch.baseURL}): ${classifyError(m ? parseInt(m[1], 10) : undefined, msg)}`)
             }
           }
-          // 全部失败
+          // 图片生成失败——只报当前渠道
           const detail = lastErr.join('\n')
           throw new Error(
-            `图片生成失败：所有 ${channels.length} 个渠道均不可用。\n` +
-            `当前选中: ${selectedId ? `「${channels.find(c=>c.id===selectedId)?.name}」` : '未指定'}\n\n` +
-            `详细错误：\n${detail}`
+            `图片生成失败（渠道「${channels.find(c=>c.id===selectedId)?.name ?? channels[0]?.name ?? '未知'}」）：${detail}`
           )
         },
     presentResult: (_args, result) => {
@@ -811,10 +809,9 @@ export function apply(ctx: Context, config: Config = {}): void {
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
           const m = msg.match(/HTTP (\d{3})/)
-          lastErr.push(`渠道「${ch.name}」(${ch.baseURL}): ${classifyError(m ? parseInt(m[1], 10) : undefined, msg)}`)
+          throw new Error(`视频生成失败（渠道「${ch.name}」）：${classifyError(m ? parseInt(m[1], 10) : undefined, msg)}`)
         }
       }
-      throw new Error(`视频生成失败：所有 ${channels.length} 个渠道均不可用。\n详细：${lastErr.join('\n')}`)
     },
     presentResult: (_args, result) => {
       const meta = result.meta as Record<string, unknown> | undefined
