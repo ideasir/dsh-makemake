@@ -485,10 +485,8 @@ export function apply(ctx: Context, config: Config = {}): void {
           // ── 总闸门：插件已关闭则不执行 ──
           if (settings.enabled === false) throw new Error('Make Make 插件已关闭，请在设置页重新启用。')
           const srcImage = args.image?.trim() ?? ''
-          // ── 硬闸门（仅纯文字出图）：没传图时必须点按钮才出，防止聊天误判 ──
-          if (!srcImage && settings.activeMode !== 'image') {
-            throw new Error('未点击「出图」按钮，无法确认出图意图。如果你想出图，请先点击工具栏的「出图」按钮，再输入提示词。')
-          }
+          // 注意：hardGate 已移除。模型自行判断是否出图，activeMode 仅作为辅助提示。
+          // 用户不点按钮时，根据意图自然调用工具。
           // 注意：这里不消费 activeMode！必须等生成成功才清空（见下方 return），
           // 否则 API 失败时模型重试会被硬闸门拒绝。
           const sizeAlias: Record<string, string> = {

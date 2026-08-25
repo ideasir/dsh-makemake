@@ -1087,70 +1087,66 @@ function ImageResultCard(props: ImageCardProps) {
             {/* 图片信息 + 操作按钮 */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxWidth: 350, alignItems: 'flex-start', alignSelf: 'flex-start' }}>
               {att && (
-                <div style={{ display: 'flex', gap: 5, alignItems: 'center', maxWidth: '100%', flexWrap: 'wrap' }}>
-                  {/* 引用 + 分辨率 + 大小（第一行） */}
-                  <div style={{ display: 'flex', gap: 5, alignItems: 'center', maxWidth: '100%' }}>
-                    {/* 引用按钮 */}
-                    <button onClick={async (e) => {
-                      e.stopPropagation()
-                      try {
-                        const resp = await fetch(url)
-                        if (!resp.ok) throw new Error('load-failed')
-                        const blob = await resp.blob()
-                        const file = new File([blob], 'reference.png', { type: blob.type || 'image/png' })
-                        const ta = document.querySelector<HTMLTextAreaElement>('textarea[data-phase]')
-                        if (!ta) return
-                        const dt = new DataTransfer()
-                        dt.items.add(file)
-                        const pasteEvent = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt })
-                        ta.dispatchEvent(pasteEvent)
-                        void navigator.clipboard.writeText(url)
-                      } catch { void navigator.clipboard.writeText(url) }
-                    }}
-                      title="引用此图到对话框"
-                      style={{ flex: 'none', width: 26, height: 26, borderRadius: 6, border: 'none', background: 'transparent', cursor: 'pointer', display: 'grid', placeItems: 'center', color: 'var(--dsw-alias-brand-primary)', transition: 'background .12s' }}
-                      onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent)' }}
-                      onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'transparent' }}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                      </svg>
-                    </button>
-                    {/* 分辨率 + 大小 */}
-                    <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                      {att.width}×{att.height} · {(att.bytes / 1024).toFixed(0)} KB
-                    </span>
-                  </div>
-                  {/* 提示词 + 复制（第二行，同一行） */}
-                  <div style={{ display: 'flex', gap: 5, alignItems: 'center', maxWidth: '100%' }}>
-                    {prompt && (
-                      <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', flex: 1,
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, cursor: 'default' }}
-                        title={prompt}>{prompt}</span>
-                    )}
-                    {/* 复制 */}
-                    <button id={`copy-btn-${i}`} onClick={(e) => {
-                      e.stopPropagation()
-                      const btn = e.currentTarget
-                      copyPrompt(prompt).then(() => {
-                        btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
-                        btn.style.color = 'var(--dsw-alias-state-success-primary)'
-                        setTimeout(() => {
-                          btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`
-                          btn.style.color = 'var(--dsw-alias-label-tertiary)'
-                        }, 1200)
-                      })
-                    }}
-                      style={{ flex: 'none', width: 22, height: 22, borderRadius: 5, border: 'none',
-                        background: 'transparent', cursor: 'pointer', display: 'grid', placeItems: 'center',
-                        color: 'var(--dsw-alias-label-tertiary)', transition: 'background .12s', padding: 0 }}
-                      onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'var(--dsw-alias-bg-hover)'; (e.target as HTMLButtonElement).style.color = 'var(--dsw-alias-label-primary)' }}
-                      onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'transparent'; (e.target as HTMLButtonElement).style.color = 'var(--dsw-alias-label-tertiary)' }}
-                      title="复制提示词">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                      </svg>
-                    </button>
-                  </div>
+                <div style={{ display: 'flex', gap: 5, alignItems: 'center', maxWidth: '100%', flexWrap: 'nowrap' }}>
+                  {/* 引用 + 尺寸 + 提示词 + 复制（全部一行） */}
+                  {/* 引用按钮 */}
+                  <button onClick={async (e) => {
+                    e.stopPropagation()
+                    try {
+                      const resp = await fetch(url)
+                      if (!resp.ok) throw new Error('load-failed')
+                      const blob = await resp.blob()
+                      const file = new File([blob], 'reference.png', { type: blob.type || 'image/png' })
+                      const ta = document.querySelector<HTMLTextAreaElement>('textarea[data-phase]')
+                      if (!ta) return
+                      const dt = new DataTransfer()
+                      dt.items.add(file)
+                      const pasteEvent = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt })
+                      ta.dispatchEvent(pasteEvent)
+                      void navigator.clipboard.writeText(url)
+                    } catch { void navigator.clipboard.writeText(url) }
+                  }}
+                    title="引用此图到对话框"
+                    style={{ flex: 'none', width: 26, height: 26, borderRadius: 6, border: 'none', background: 'transparent', cursor: 'pointer', display: 'grid', placeItems: 'center', color: 'var(--dsw-alias-brand-primary)', transition: 'background .12s' }}
+                    onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent)' }}
+                    onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'transparent' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                    </svg>
+                  </button>
+                  {/* 分辨率 + 大小 */}
+                  <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    {att.width}×{att.height} · {(att.bytes / 1024).toFixed(0)} KB
+                  </span>
+                  {/* 渠道名 + 提示词 */}
+                  {prompt && (
+                    <span style={{ fontSize: 10, color: 'var(--dsw-alias-label-tertiary)', flex: 1,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, cursor: 'default' }}
+                      title={prompt}>{prompt}</span>
+                  )}
+                  {/* 复制 */}
+                  <button id={`copy-btn-${i}`} onClick={(e) => {
+                    e.stopPropagation()
+                    const btn = e.currentTarget
+                    copyPrompt(prompt).then(() => {
+                      btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
+                      btn.style.color = 'var(--dsw-alias-state-success-primary)'
+                      setTimeout(() => {
+                        btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`
+                        btn.style.color = 'var(--dsw-alias-label-tertiary)'
+                      }, 1200)
+                    })
+                  }}
+                    style={{ flex: 'none', width: 22, height: 22, borderRadius: 5, border: 'none',
+                      background: 'transparent', cursor: 'pointer', display: 'grid', placeItems: 'center',
+                      color: 'var(--dsw-alias-label-tertiary)', transition: 'background .12s', padding: 0 }}
+                    onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'var(--dsw-alias-bg-hover)'; (e.target as HTMLButtonElement).style.color = 'var(--dsw-alias-label-primary)' }}
+                    onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'transparent'; (e.target as HTMLButtonElement).style.color = 'var(--dsw-alias-label-tertiary)' }}
+                    title="复制提示词">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                    </svg>
+                  </button>
                 </div>
               )}
             </div>
