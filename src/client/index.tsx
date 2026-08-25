@@ -35,9 +35,6 @@ interface MakemakeSettings {
 // 同时镜像到 scope.activeMode（服务端 systemPrompt 读取，告诉模型当前模式）
 // 图片/视频互斥：'image' | 'video' | null
 let activeBadge: 'image' | 'video' | null = null
-// 已发送消息的激活模式队列：Enter 发送时推入，气泡节点出现后注册到持久化映射表
-// 格式：{ mode, channelName } — channelName 来自选中的渠道名
-let sentModesQueue: Array<{ mode: 'image' | 'video'; channelName: string }> = []
 
 interface SettingsFace {
   scope: SettingsScope<MakemakeSettings>
@@ -248,59 +245,10 @@ export function apply(ctx: Context): void {
     inject: (): { scope: SettingsScope<MakemakeSettings> } => ({ scope }),
   }, (props: { scope: SettingsScope<MakemakeSettings> }) => <MakeMakeButtons scope={props.scope} />))
 
-  // ─── 用户消息气泡左侧图标 ──────────────────────────────────────────────
-    // 发送时记录激活模式（image/video），气泡渲染后在其左侧外部贴 SVG 图标
-    // 图标动态定位：轮询测量气泡真实左边沿，图标贴在气泡旁
-    // 持久化方案：chatAnchorKey 刷新后不变 → key→mode 映射表存 localStorage，刷新后恢复
-    ctx.effect(() => {
-      const style = document.createElement('style')
-      style.dataset.plugin = 'dsh-makemake-msg-icon'
-      style.textContent = `
-  [data-chat-flow-kind="user"]{position:relative}
-  [data-chat-flow-kind="user"] .dsh-mm-msg-label{position:absolute;z-index:5;pointer-events:none;font-size:11px;font-weight:500;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2,#2c2c2e);border:1px solid var(--dsw-alias-border-l2,#444);border-radius:4px;padding:0 5px;line-height:16px;white-space:nowrap;top:4px;right:4px}
-  `
-      document.head.appendChild(style)
-
-      // 持久化 key→channel name 映射表（localStorage，刷新后恢复）
-      const STORAGE_KEY = 'dsh-mm-msg-icon-map'
-      let iconMap: Record<string, string> = (() => {
-        try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') } catch { return {} }
-      })()
-      const persist = () => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(iconMap)) } catch { /* ignore */ } }
-
-      const tick = () => {
-        const nodes = Array.from(document.querySelectorAll<HTMLElement>('[data-chat-flow-kind="user"]'))
-        // 新节点（不在映射表、队列有值）→ 分配标签并持久化
-        for (const node of nodes) {
-          const key = node.dataset.chatAnchorKey ?? ''
-          if (!key || iconMap[key]) continue
-          const item = sentModesQueue.shift()
-          if (!item) continue
-          iconMap[key] = item.channelName
-          persist()
-        }
-        // 渲染标签：从持久化映射表读取 channel name
-        for (const node of nodes) {
-          const key = node.dataset.chatAnchorKey ?? ''
-          if (!key) continue
-          const channelName = iconMap[key]
-          if (!channelName) continue
-          // 已有标签 → 更新文本
-          let label = node.querySelector<HTMLElement>('.dsh-mm-msg-label')
-          if (!label) {
-            label = document.createElement('span')
-            label.className = 'dsh-mm-msg-label'
-            node.appendChild(label)
-          }
-          label.textContent = channelName
-        }
-        // 清理：只清理极端不存在的 key（保留映射，虚拟滚动卸载节点后图标可重建）
-        // 注意：不能删！DSH 消息列表虚拟滚动会临时卸载节点，activeKeys 会变少，
-        // 删除映射会导致图标永久丢失。映射常驻 localStorage（容量小，1KB 内）。
-      }
-      const iv = setInterval(tick, 400)
-      return () => { clearInterval(iv); style.remove() }
-    }, 'dsh-makemake: message icon')
+  // ─── 消息气泡前缀注入 ──────────────────────────────────
+  // 用户点击「出图」按钮后，发送时自动在提示词前加「出图：」或「出视频：」
+  // 这样气泡里直接显示"出图：一只猫"，模型读了也知道是出图请求
+  // 同时保留 activeMode 给服务端 systemPrompt 用（备用方案）
 }
 
 function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) {
@@ -342,13 +290,11 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
   }, [contextMenu])
 
   // 发送时：渠道信息不进消息文本，只清空徽章。渠道由 selected 状态 + 工具调用传递。
-  // 当前渠道名（气泡标签用）：image → selectedImageChannel 对应 name，video → selectedVideoChannel 对应 name
-  let lastChannelName: Record<'image' | 'video', string> = { image: '', video: '' }
   useEffect(() => {
     if (!visible) return
     const taSel = () => document.querySelector<HTMLTextAreaElement>('textarea[data-phase]')
 
-    // 1) Enter 发送：不改消息文本（气泡显示纯净提示词），只记录模式供标签 + 保留 activeMode
+    // 1) Enter 发送：在提示词前加"出图："或"出视频："前缀，让气泡里直接可见
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return
       const ta = taSel()
@@ -356,36 +302,27 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
       if (!activeBadge) return
       e.stopPropagation()
       e.preventDefault()
-      // 记录本次发送的激活模式 + 渠道名（气泡标签用）
-      const chs = activeBadge === 'image' ? (settings.imageChannels ?? []) : (settings.videoChannels ?? [])
-      const selId = activeBadge === 'image' ? settings.selectedImageChannel : settings.selectedVideoChannel
-      const chName = chs.find(c => c.id === selId)?.name ?? chs[0]?.name ?? ''
-      if (chName) lastChannelName[activeBadge] = chName
-      sentModesQueue.push({ mode: activeBadge, channelName: chName || (activeBadge === 'image' ? '图片' : '视频') })
-      // 不注入任何文字进消息——"出图/出视频"由服务端 systemPrompt 注入（模型可见，前端不显示）
-      activeBadge = null
-      // 触发真正发送（activeMode 保留在 scope，服务端 systemPrompt 读取后消费）
+      // 注入前缀
+      const prefix = activeBadge === 'image' ? '出图：' : '出视频：'
+      const currentText = ta.value
+      ta.value = prefix + currentText
+      // 触发真正发送
       setTimeout(() => {
         ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }))
       }, 0)
-      // 不再自动清理 activeMode——execute 端消费后清空。
+      // 不自动清理 activeMode——execute 端消费后清空。
       // 如果模型没调工具，用户打下一条消息时会自动清空（见下方兜底检测）。
     }
 
     // 2) 兜底：无论用哪种方式发送（Enter 或点发送按钮），消息发出后输入框清空
-    // → 若仍有激活模式，注册到标签队列 + 清空徽章
+    // → 若仍有激活模式，清空徽章
     let prev = ''
     const iv = setInterval(() => {
       const ta = taSel()
       if (!ta) return
       const v = ta.value
       if (prev !== '' && v === '' && activeBadge) {
-        // Enter 拦截器已 push 并清空，不会重复；点按钮发送时这里补注册
-        const chs = activeBadge === 'image' ? (settings.imageChannels ?? []) : (settings.videoChannels ?? [])
-        const selId = activeBadge === 'image' ? settings.selectedImageChannel : settings.selectedVideoChannel
-        const chName = chs.find(c => c.id === selId)?.name ?? chs[0]?.name ?? ''
-        if (chName) lastChannelName[activeBadge] = chName
-        sentModesQueue.push({ mode: activeBadge, channelName: chName || (activeBadge === 'image' ? '图片' : '视频') })
+        // Enter 拦截器已处理并注入前缀，不会重复；点按钮发送时这里清空徽章
         activeBadge = null
       }
       prev = v
