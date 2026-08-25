@@ -15,8 +15,9 @@ import { MAKEMAKESKILL } from './skill.js'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 
-/** 图生图迭代计数：同一张图（attachmentId hash）连续生成时累加，换新图则重置 */
-const img2imgCounters = new Map<string, number>()
+/** 图生图迭代计数：跟踪上一轮图生图的输出图 */
+let lastImg2imgOutput: string | null = null
+let lastImg2imgCount = 0
 
 export { Config } from './config.js'
 export { IMAGE_ROUTE } from './shared.js'
@@ -507,14 +508,15 @@ export function apply(ctx: Context, config: Config = {}): void {
           const normalizeImageUrl = (url: string) => url.replace(/^https?:\/\/[^/]+/, dshUrl.origin)
           const normalizedSrcImage = normalizeImageUrl(srcImage)
           // 识别图生图：传了参考图（attachmentId / URL / 本地路径）即为图生图
-          // 迭代计数：同一张图（attachmentId hash）连续生成时 iteration+1，换新图从 1 重新计
+          // 迭代计数规则：参考图是 makemake 生成的图（路由带 /plugins/dsh-makemake/image?）
+          // = 用户点击「引用此图」继续改 → 迭代链 +1
+          // 参考图是用户上传的新图 / 外部 URL → 新链起点，从 1 开始
+          // 注：不能用 attachmentId/hash 比较——DSH 粘贴附件会重编码，hash 每次都变
           const isImg2Img = !!normalizedSrcImage
           let iteration = 0
           if (isImg2Img) {
-            // 取 attachmentId 的 hash 作为图片标识（URL/本地路径用原始字符串做 key）
-            const am = normalizedSrcImage.match(/attachmentId=(sha256:[0-9a-f]+)/)
-            const imgKey = am?.[1] ?? normalizedSrcImage
-            iteration = (img2imgCounters.get(imgKey) ?? 0) + 1
+            const isOurGenerated = normalizedSrcImage.includes('/plugins/dsh-makemake/image?')
+            iteration = isOurGenerated ? lastImg2imgCount + 1 : 1
           }
 
           // 纯透传：只使用当前选定的渠道，绝不遍历其他渠道
@@ -622,11 +624,10 @@ export function apply(ctx: Context, config: Config = {}): void {
             // 生成成功后才消费 activeMode（handleResponse 可能抛错，失败时保留给重试）
             const result = await handleResponse(response)
             void scope.update({ activeMode: null }).catch(() => {})
-            // 更新迭代计数：成功才累加，换图从 1 开始，失败不消耗
+            // 更新迭代计数：成功才更新，失败不消耗（模型重试仍可继续）
             if (isImg2Img && result.attachment.attachmentId) {
-              const am = normalizedSrcImage.match(/attachmentId=(sha256:[0-9a-f]+)/)
-              const imgKey = am?.[1] ?? normalizedSrcImage
-              img2imgCounters.set(imgKey, iteration)
+              lastImg2imgOutput = result.attachment.attachmentId
+              lastImg2imgCount = iteration
             }
             return result
             } catch (e) {
