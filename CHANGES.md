@@ -1,5 +1,35 @@
 # CHANGES.md
 
+## 2026-08-23 (晚2) - 图生视频支持 + 检测区分文生/图生视频
+
+### 问题
+用户上传图片后用"让画面动起来"出视频，但 makemake_video 工具**没有 image 参数**，模型没法传参考图，结果被当成文生视频处理。
+
+### 解决方案
+1. **makemake_video 工具加 image 参数**：`{ type: 'string', description: 'Optional reference image URL or path for image-to-video (i2v)' }`
+2. **execute 里传 image 到请求体**：有 image 时加 `image: resolvedImage` 到 POST body（Agnes 文档规定图生视频用顶层 `image` 字段传图片 URL）
+3. **检测路由加图生视频探测**（`/plugins/dsh-makemake/test`）：POST `/v1/videos` + data URL 图片，看返回码判断图生视频端点是否可用
+4. **前端 UI 检测结果细分**：原来只显示一个"视频"行，现在分两行：
+   - 文生视频 ✓/✗ POST /v1/videos
+   - 图生视频 ✓/✗ POST /v1/videos
+5. **skill.ts 更新**：明确说"图生视频传 image 参数"
+
+### 踩坑记录
+- **Agnes 图生视频用顶层 image 字段**（不是 extra_body.image）。文档原文：`image | string | 否 | 图生视频使用的图片 URL`。extra_body.image 是**关键帧动画**用的，不是单图生视频。
+- **Agnes 视频 API 1 分钟限流 1 次**：探测时不能真实生成，只能发探针看返回码（429 都算端点可用）
+- **探测只能用 data URL 图片**：不能传 URL，因为探测时没有可公开访问的图片 URL。data URL 是 Base64 编码的小图，无需外部存储。
+
+### 验证
+- tsc --noEmitOnError false + tsdown 构建成功
+- lib/index.js 35KB，lib/client.js 68KB
+- DSH 重启后 127.0.0.1:3080 正常
+- 代码已推送 GitHub（commit baf0584）
+
+### 修改文件
+- `src/index.ts` — 工具 image 参数 + execute 传 image + 检测路由图生视频探测 + 类型声明
+- `src/client/index.tsx` — 检测结果分别显示文生视频/图生视频
+- `src/skill.ts` — 图生视频调用规则
+
 ## 2026-08-23 (晚) - 右键渠道选择 + /渠道名 命令规范
 
 ### 需求背景

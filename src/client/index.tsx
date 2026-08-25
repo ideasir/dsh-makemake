@@ -27,7 +27,16 @@ interface MakemakeSettings {
   videoChannels?: Channel[]
   selectedImageChannel?: string
   selectedVideoChannel?: string
+  /** 用户当前激活的生成模式（点图标切换）：'image' | 'video' | null */
+  activeMode?: 'image' | 'video' | null
 }
+
+// 临时激活渠道（内存中，即时响应 UI）：点图标出现徽章，再点消失
+// 同时镜像到 scope.activeMode（服务端 systemPrompt 读取，告诉模型当前模式）
+// 图片/视频互斥：'image' | 'video' | null
+let activeBadge: 'image' | 'video' | null = null
+// 已发送消息的激活模式队列：Enter 发送时推入，气泡节点出现后注册到持久化映射表
+let sentModesQueue: Array<'image' | 'video'> = []
 
 interface SettingsFace {
   scope: SettingsScope<MakemakeSettings>
@@ -73,7 +82,12 @@ const STYLE = `
 .dsh-mm-dot{width:9px;height:9px;border-radius:999px;transition:background .12s}
 .dsh-mm-dot.ok{background:var(--dsw-alias-state-success-primary);box-shadow:0 0 6px var(--dsw-alias-state-success-primary)}
 .dsh-mm-dot.off{background:var(--dsw-alias-label-tertiary)}
+/* 徽章避让：用 CSS 变量控制 backdrop+输入框 padding-left，避免直接改 React 内联样式 */
+/* backdrop 是文字渲染层，textarea 是输入层，两者必须同步偏移才不会错位 */
+.uV2eYG_backdrop,.uV2eYG_input{padding-left:var(--dsh-mm-pad,16px)!important}
 .dsh-mm-badge{position:absolute;top:-6px;right:8px;font-size:10px;line-height:16px;font-weight:600;color:var(--dsw-alias-state-error-primary);background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:4px;padding:0 6px}
+/* 命令高亮 */
+@keyframes dsh-mm-spin{to{transform:rotate(360deg)}}
 `
 
 export const inject = ['slots', 'connection', 'remote', 'settingsScope'] as const
@@ -135,34 +149,67 @@ export function apply(ctx: Context): void {
     return () => { style.remove() }
   }, 'dsh-makemake: styles')
 
-  // 命令高亮：渠道名命令（/渠道名）高亮亮蓝色，其他命令保持默认颜色
+  // 输入框渠道徽章：独立视觉指示器，不碰输入框文本
+  // 点图标激活显示徽章，再点取消；图片/视频互斥切换
+  // 徽章上移（不居中），小尺寸，文本从徽章右侧自然开始
   ctx.effect(() => {
-    let mo: MutationObserver | null = null
-    const paint = () => {
-      document.querySelectorAll<HTMLElement>('mark[data-decoration="token"]').forEach(el => {
-        const text = el.textContent ?? ''
-        if (/^\/[\u4e00-\u9fa5A-Za-z0-9_-]+/.test(text)) {
-          el.style.color = '#00d4ff'
-          el.style.textShadow = '0 0 10px rgba(0,212,255,0.5)'
-        } else {
-          // 非渠道命令：清除内联样式，恢复 DSH 默认高亮色
-          el.style.color = ''
-          el.style.textShadow = ''
-        }
-      })
+    let badge: HTMLDivElement | null = null
+    let lastKey = ''
+    const imageSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>'
+    const videoSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="14" height="16" rx="2" ry="2"/><path d="m16 8 4-2.5v13L16 16"/></svg>'
+    const tick = () => {
+      // 只读内存中的激活状态（不持久化）
+      const mode = activeBadge
+      const snap = scope.getSnapshot().value
+      const imgChs = snap?.imageChannels ?? []
+      const vidChs = snap?.videoChannels ?? []
+      // 根据激活类型找对应渠道
+      let label = ''
+      let isVideo = false
+      if (mode === 'video') {
+        const sel = vidChs.find(c => c.id === snap?.selectedVideoChannel) ?? vidChs[0]
+        if (sel) { label = sel.name; isVideo = true }
+      } else if (mode === 'image') {
+        const sel = imgChs.find(c => c.id === snap?.selectedImageChannel) ?? imgChs[0]
+        if (sel) { label = sel.name; isVideo = false }
+      }
+      const key = `${mode}:${label}`
+      if (key === lastKey) return
+      lastKey = key
+      const backdrop = document.querySelector('.uV2eYG_backdrop')
+      const host = backdrop?.parentElement ?? document.querySelector('.uV2eYG_grow')
+      if (!host) {
+        badge?.remove(); badge = null
+        return
+      }
+      if (!label) {
+        badge?.remove(); badge = null
+        // 恢复 padding-left（CSS 变量复位）
+        document.documentElement.style.setProperty('--dsh-mm-pad', '16px')
+        return
+      }
+      const svg = isVideo ? videoSvg : imageSvg
+      if (!badge) {
+        badge = document.createElement('div')
+        badge.dataset.plugin = 'dsh-makemake-badge'
+        badge.style.cssText = 'position:absolute;top:4px;left:16px;z-index:6;pointer-events:auto;display:flex;align-items:center;gap:4px;white-space:nowrap;' +
+          'background:#2c2c2e;border:1px solid #00E5FF55;border-radius:999px;padding:1px 6px 1px 8px;height:20px;' +
+          'color:#00E5FF;font-size:12px;line-height:18px;font-family:"SF Mono",Menlo,Consolas,monospace;cursor:pointer'
+        host.appendChild(badge)
+      }
+      badge.innerHTML = svg + `<span>${label.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</span>` +
+        `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-left:2px;color:#00E5FF88;flex-shrink:0;cursor:pointer"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`
+      badge.onclick = () => {
+        activeBadge = null
+        scope.set('activeMode', null)
+      }
+      // 用 CSS 变量避让文本（不碰 React 管理的 backdrop 内联样式）
+      const bw = badge.offsetWidth
+      document.documentElement.style.setProperty('--dsh-mm-pad', `${Math.max(16, bw + 20)}px`)
     }
-    // 初始执行
-    paint()
-    // 监听 backdrop 区域变化
-    const target = document.querySelector('.uV2eYG_backdrop') || document.querySelector('[class*="backdrop"]')
-    if (target) {
-      mo = new MutationObserver(paint)
-      mo.observe(target, { childList: true, subtree: true, characterData: true })
-    }
-    // fallback: 每 500ms 检查一次
-    const iv = setInterval(paint, 500)
-    return () => { mo?.disconnect(); clearInterval(iv) }
-  }, 'dsh-makemake: hl-color')
+    const iv = setInterval(tick, 300)
+    return () => { clearInterval(iv); badge?.remove() }
+  }, 'dsh-makemake: input badge')
 
   const register = ctx.slots.register.bind(ctx.slots) as unknown as (opts: object, comp: unknown) => () => void
 
@@ -199,6 +246,94 @@ export function apply(ctx: Context): void {
     order: 90,
     inject: (): { scope: SettingsScope<MakemakeSettings> } => ({ scope }),
   }, (props: { scope: SettingsScope<MakemakeSettings> }) => <MakeMakeButtons scope={props.scope} />))
+
+  // ─── 用户消息气泡左侧图标 ──────────────────────────────────────────────
+    // 发送时记录激活模式（image/video），气泡渲染后在其左侧外部贴 SVG 图标
+    // 图标动态定位：轮询测量气泡真实左边沿，图标贴在气泡旁
+    // 持久化方案：chatAnchorKey 刷新后不变 → key→mode 映射表存 localStorage，刷新后恢复
+    ctx.effect(() => {
+      const style = document.createElement('style')
+      style.dataset.plugin = 'dsh-makemake-msg-icon'
+      style.textContent = `
+  [data-chat-flow-kind="user"]{position:relative}
+  [data-chat-flow-kind="user"] .dsh-mm-msg-icon{position:absolute;z-index:5;pointer-events:none;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:#00E5FF;opacity:.8;left:-9999px;top:-9999px}
+  `
+      document.head.appendChild(style)
+
+      const imageSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>'
+      const videoSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="14" height="16" rx="2" ry="2"/><path d="m16 8 4-2.5v13L16 16"/></svg>'
+
+      // 持久化 key→mode 映射表（localStorage，刷新后恢复）
+      const STORAGE_KEY = 'dsh-mm-msg-icon-map'
+      let iconMap: Record<string, 'image' | 'video'> = (() => {
+        try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') } catch { return {} }
+      })()
+      const persist = () => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(iconMap)) } catch { /* ignore */ } }
+
+      // 计算气泡真实左边沿
+      const bubbleLeftOf = (node: HTMLElement): { left: number; top: number; height: number } | null => {
+        const flowRect = node.getBoundingClientRect()
+        let minLeft = Infinity
+        let top = 0
+        let height = 0
+        const all = node.querySelectorAll('*')
+        for (const el of all) {
+          const e = el as HTMLElement
+          if (e.classList.contains('dsh-mm-msg-icon')) continue
+          const r = e.getBoundingClientRect()
+          if (r.width <= 0 || r.height <= 0) continue
+          const isLeaf = e.children.length === 0 && (e.textContent ?? '').trim().length > 0
+          const hasImg = e.tagName === 'IMG' || !!e.querySelector('img')
+          if (!isLeaf && !hasImg) continue
+          if (r.left < minLeft) {
+            minLeft = r.left; top = r.top; height = r.height
+          }
+        }
+        if (minLeft === Infinity) return null
+        return { left: minLeft - flowRect.left, top: top - flowRect.top, height }
+      }
+
+      const tick = () => {
+        const nodes = Array.from(document.querySelectorAll<HTMLElement>('[data-chat-flow-kind="user"]'))
+        // 新节点（不在映射表、队列有值）→ 分配模式并持久化
+        for (const node of nodes) {
+          const key = node.dataset.chatAnchorKey ?? ''
+          if (!key || iconMap[key]) continue
+          const mode = sentModesQueue.shift()
+          if (!mode) continue
+          iconMap[key] = mode
+          persist()
+        }
+        // 渲染图标：从持久化映射表读取模式
+        for (const node of nodes) {
+          const key = node.dataset.chatAnchorKey ?? ''
+          if (!key) continue
+          const mode = iconMap[key]
+          if (!mode) continue
+          // 已有图标 → 更新位置
+          let icon = node.querySelector<HTMLElement>('.dsh-mm-msg-icon')
+          if (!icon) {
+            icon = document.createElement('div')
+            icon.className = 'dsh-mm-msg-icon'
+            icon.innerHTML = mode === 'image' ? imageSvg : videoSvg
+            node.appendChild(icon)
+          }
+          // 动态定位：图标贴气泡右边缘，顶部对齐气泡最上边
+          // 用户气泡通常在 flowItem 右半区，用 right 定位贴右侧
+          const pos = bubbleLeftOf(node)
+          if (pos) {
+            icon.style.right = '-4px'
+            icon.style.top = `${pos.top}px`
+            icon.style.left = 'auto'
+          }
+        }
+        // 清理：只清理极端不存在的 key（保留映射，虚拟滚动卸载节点后图标可重建）
+        // 注意：不能删！DSH 消息列表虚拟滚动会临时卸载节点，activeKeys 会变少，
+        // 删除映射会导致图标永久丢失。映射常驻 localStorage（容量小，1KB 内）。
+      }
+      const iv = setInterval(tick, 400)
+      return () => { clearInterval(iv); style.remove() }
+    }, 'dsh-makemake: message icon')
 }
 
 function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) {
@@ -223,6 +358,7 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
     return scope.subscribe(() => {
       try {
         const v = scope.getSnapshot()
+        setVisible(v.value?.enabled !== false)
         setSettings(v.value ?? {})
       } catch { /* ignore */ }
     })
@@ -238,21 +374,69 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
     return () => window.removeEventListener('mousedown', close)
   }, [contextMenu])
 
-  const inject = (cmd: string) => {
-    const ta = document.querySelector<HTMLTextAreaElement>('textarea[data-phase]')
-    if (!ta) return
-    ta.focus()
-    const nativeInput = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')
-    nativeInput?.set?.call(ta, ta.value + cmd)
-    ta.dispatchEvent(new Event('input', { bubbles: true }))
-  }
+  // 发送时：渠道信息不进消息文本，只清空徽章。渠道由 selected 状态 + 工具调用传递。
+  useEffect(() => {
+    if (!visible) return
+    const taSel = () => document.querySelector<HTMLTextAreaElement>('textarea[data-phase]')
+
+    // 1) Enter 发送：不改消息文本（气泡显示纯净提示词），只记录模式供图标 + 保留 activeMode
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return
+      const ta = taSel()
+      if (!ta || document.activeElement !== ta) return
+      if (!activeBadge) return
+      e.stopPropagation()
+      e.preventDefault()
+      // 记录本次发送的激活模式（气泡图标用）
+      sentModesQueue.push(activeBadge)
+      // 不注入任何文字进消息——"出图/出视频"由服务端 systemPrompt 注入（模型可见，前端不显示）
+      activeBadge = null
+      // 触发真正发送（activeMode 保留在 scope，服务端 systemPrompt 读取后消费）
+      setTimeout(() => {
+        ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }))
+      }, 0)
+      // 不再自动清理 activeMode——execute 端消费后清空。
+      // 如果模型没调工具，用户打下一条消息时会自动清空（见下方兜底检测）。
+    }
+
+    // 2) 兜底：无论用哪种方式发送（Enter 或点发送按钮），消息发出后输入框清空
+    // → 若仍有激活模式，注册到图标队列 + 清空徽章
+    let prev = ''
+    const iv = setInterval(() => {
+      const ta = taSel()
+      if (!ta) return
+      const v = ta.value
+      if (prev !== '' && v === '' && activeBadge) {
+        // Enter 拦截器已 push 并清空，不会重复；点按钮发送时这里补注册
+        sentModesQueue.push(activeBadge)
+        activeBadge = null
+      }
+      prev = v
+    }, 250)
+
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => { window.removeEventListener('keydown', onKeyDown, true); clearInterval(iv) }
+  }, [visible])
 
   const handleLeftClick = (type: 'image' | 'video') => {
     const channels = type === 'image' ? settings.imageChannels ?? [] : settings.videoChannels ?? []
     const selectedId = type === 'image' ? settings.selectedImageChannel : settings.selectedVideoChannel
     const selected = channels.find(c => c.id === selectedId) ?? channels[0]
     if (!selected) return
-    inject(`/${selected.name} `)
+    const key = type === 'image' ? 'selectedImageChannel' : 'selectedVideoChannel'
+    const otherKey = type === 'image' ? 'selectedVideoChannel' : 'selectedImageChannel'
+    if (activeBadge === type) {
+      // 再点同一个 → 取消激活（隐藏徽章）——activeMode 清空，模型不再认为有激活渠道
+      activeBadge = null
+      scope.set('activeMode', null)
+    } else {
+      // 点不同类型 → 切换（或首次激活）
+      activeBadge = type
+      scope.set('activeMode', type)
+      // 持久化当前渠道给模型用
+      scope.set(key, selected.id)
+      scope.set(otherKey, undefined)
+    }
   }
 
   const handleRightClick = (e: React.MouseEvent, type: 'image' | 'video') => {
@@ -260,13 +444,19 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
     const channels = type === 'image' ? settings.imageChannels ?? [] : settings.videoChannels ?? []
     const selectedId = type === 'image' ? settings.selectedImageChannel : settings.selectedVideoChannel
     if (channels.length === 0) return
+    // 先记下鼠标位置，后续 useEffect 里根据菜单实际高度调整弹出方向
     setContextMenu({ type, channels, selectedId: selectedId ?? '', x: e.clientX, y: e.clientY })
   }
 
   const handleChannelSelect = async (ch: Channel) => {
     const key = contextMenu!.type === 'image' ? 'selectedImageChannel' : 'selectedVideoChannel'
+    const otherKey = contextMenu!.type === 'image' ? 'selectedVideoChannel' : 'selectedImageChannel'
     await scope.set(key, ch.id)
-    inject(`/${ch.name} `)
+    await scope.set(otherKey, undefined)
+    // 右键选渠道后激活徽章 + 持久化 activeMode
+    activeBadge = contextMenu!.type
+    await scope.set('activeMode', contextMenu!.type)
+    // 不注入文本，徽章会自动更新
     setContextMenu(null)
   }
 
@@ -300,8 +490,13 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
       {contextMenu && (
         <div ref={menuRef}
           style={{
-            position: 'fixed', left: contextMenu.x, top: contextMenu.y, zIndex: 10000,
-            minWidth: 160, background: 'var(--dsw-alias-bg-layer-3,#1e1e1e)',
+            position: 'fixed',
+            left: contextMenu.x,
+            // 向上弹出：菜单底部 = 鼠标点击位置上方 8px
+            bottom: window.innerHeight - contextMenu.y - 8,
+            zIndex: 10000,
+            minWidth: 160, maxHeight: 320, overflowY: 'auto',
+            background: 'var(--dsw-alias-bg-layer-3,#1e1e1e)',
             border: '1px solid var(--dsw-alias-border-l2,#333)',
             borderRadius: 8, padding: 4, boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
           }}>
@@ -332,9 +527,10 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
 
 function MakemakePluginCard(props: CardProps) {
   const [open, setOpen] = useState(false)
-  const [version, setVersion] = useState('0.1.1-rc.2')
+  const [version, setVersion] = useState('0825-0.1.1-rc.2')
   const [hasUpdate, setHasUpdate] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
+  const [showCheckModal, setShowCheckModal] = useState(false)
   const { scope, pluginSettings } = props
 
   return (
@@ -359,7 +555,7 @@ function MakemakePluginCard(props: CardProps) {
               onClick={(e: React.MouseEvent) => { e.stopPropagation(); setVersion(v => v + ''); }}
               title="当前已是最新版本（点击重新检查）">已最新</button>
           )}
-          <Button variant="outline" size="sm" onClick={(e: React.MouseEvent) => e.stopPropagation()}>{'环境检测'}</Button>
+          <Button variant="outline" size="sm" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setShowCheckModal(true) }}>{'智能检测'}</Button>
           <span className={`dsh-mm-chevron ${open ? 'dsh-mm-chevron-open' : ''}`} style={{ transform: open ? 'rotate(180deg)' : 'none' }}>
             <IconChevronDownOutline14 />
           </span>
@@ -375,6 +571,7 @@ function MakemakePluginCard(props: CardProps) {
           <PluginBody scope={scope} pluginSettings={pluginSettings} />
         </div>
       )}
+      {showCheckModal && <CheckModal pluginSettings={pluginSettings} onClose={() => setShowCheckModal(false)} />}
     </li>
   )
 }
@@ -432,8 +629,14 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
   }, [])
 
   const toggleEnabled = async () => {
-    await scope.set('enabled', !enabled)
-    setEnabled(v => !v)
+    const nextEnabled = !enabled
+    await scope.set('enabled', nextEnabled)
+    if (!nextEnabled) {
+      // 关闭时清掉激活模式与徽章，防止重开后残留"出图意图"导致乱出图
+      activeBadge = null
+      await scope.set('activeMode', null)
+    }
+    setEnabled(nextEnabled)
   }
 
   const channels = openPanel === 'image' ? imageChannels : openPanel === 'video' ? videoChannels : []
@@ -708,7 +911,9 @@ function VideoChannelPanel({
             <button onClick={() => setEditing(null)} style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent', cursor: 'pointer' }}>取消</button>
             <button onClick={() => { void testChannel() }} disabled={testState === 'testing'}
               style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6, border: '1px solid var(--dsw-alias-brand-primary)', background: 'transparent', color: 'var(--dsw-alias-brand-primary)', cursor: testState === 'testing' ? 'wait' : 'pointer', opacity: testState === 'testing' ? 0.6 : 1 }}>
-              {testState === 'testing' ? '检测中…' : '🔍 检测'}
+              {testState === 'testing' ? '检测中…' : (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><LucideSearch size={12} /> 检测</span>
+              )}
             </button>
             <button onClick={saveChannel} style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6, border: 'none', background: 'var(--dsw-alias-state-success-primary)', color: '#fff', cursor: 'pointer' }}>保存</button>
           </div>
@@ -791,6 +996,30 @@ const LucideImage = ({ size }: { size: number }) => (
 
 const LucideVideo = ({ size }: { size: number }) => (
   <L size={size} d={[<rect key="r" x="2" y="4" width="14" height="16" rx="2" ry="2" />, <path key="p1" d="m16 8 4-2.5v13L16 16" />]} />
+)
+
+const LucideSearch = ({ size }: { size: number }) => (
+  <L size={size} d={[<circle key="c" cx="11" cy="11" r="8" />, <path key="p" d="m21 21-4.3-4.3" />]} />
+)
+
+const LucideX = ({ size }: { size: number }) => (
+  <L size={size} d={[<path key="p1" d="M18 6 6 18" />, <path key="p2" d="m6 6 12 12" />]} />
+)
+
+const LucideLoader = ({ size }: { size: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ animation: 'dsh-mm-spin 1s linear infinite' }}>
+    <g stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </g>
+  </svg>
+)
+
+const LucideImageCc = ({ size }: { size: number }) => (
+  <L size={size} d={[<rect key="r" x="3" y="3" width="18" height="18" rx="2" ry="2" />, <circle key="c" cx="8.5" cy="8.5" r="1.5" />, <path key="p" d="m21 15-5-5L5 21" />]} />
+)
+
+const LucideFilm = ({ size }: { size: number }) => (
+  <L size={size} d={[<rect key="r" x="2" y="4" width="14" height="16" rx="2" ry="2" />, <path key="p1" d="m16 8 4-2.5v13L16 16" />, <path key="p2" d="M7 8h.01" />, <path key="p3" d="M4 13h.01" />, <path key="p4" d="M7 15h.01" />]} />
 )
 
 // ─── Modal anim ──────────────────────────────────────────────────────────
@@ -982,7 +1211,7 @@ function ImageResultCard(props: ImageCardProps) {
       {textBlocks.length > 0 && !prompt && <p style={{ margin: 0, fontSize: 13, color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1.5 }}>{textBlocks.map((b: any) => b.text).join('')}</p>}
       {modalUrl && (
         <div className={`dsh-mm-modal ${dragging ? 'dragging' : ''} ${closing ? 'closing' : ''}`} onClick={closeModal}>
-          <button className="dsh-mm-modal-close" onClick={closeModal}>✕</button>
+          <button className="dsh-mm-modal-close" onClick={closeModal}><LucideX size={18} /></button>
           <img ref={imgRef} src={modalUrl} alt="大图"
             className={`dsh-mm-modal-img ${dragging ? 'dragging' : ''}`}
             onWheel={handleWheel}
@@ -1035,7 +1264,7 @@ function VideoResultCard(props: ImageCardProps) {
         <p style={{ margin: 0, fontSize: 13, color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1.5 }}>{fullText}</p>
       )}
       <div style={{ display: 'flex', gap: 5, alignItems: 'center', maxWidth: '100%', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>🎬 视频</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--dsw-alias-label-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}><LucideFilm size={12} /> 视频</span>
         <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }} title={desc}>{desc || '已生成'}</span>
         {videoUrl && (
           <button onClick={(e) => { e.stopPropagation(); window.open(videoUrl, '_blank', 'noreferrer') }}
@@ -1051,6 +1280,133 @@ function VideoResultCard(props: ImageCardProps) {
           <video src={modalUrl} controls autoPlay playsInline style={{ maxWidth: '92vw', maxHeight: '88vh', borderRadius: 10 }} />
         </div>
       )}
+    </div>
+  )
+}
+
+interface CheckResult {
+  name: string; type: 'image' | 'video'; baseURL: string; model: string
+  keyConfigured: boolean; textToImage?: { ok: boolean; detail?: string }
+  imageToImage?: { ok: boolean; formats: string[] }
+  textToVideo?: { ok: boolean; detail?: string }
+  imageToVideo?: { ok: boolean; detail?: string }
+  error?: string
+}
+interface CheckResponse { ok: boolean; results: CheckResult[] }
+
+function CheckModal({ pluginSettings, onClose }: { pluginSettings: PluginSettingsClient; onClose: () => void }) {
+  const [results, setResults] = useState<CheckResult[] | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      try {
+        const res = await fetch('/plugins/dsh-makemake/check-all', { method: 'POST', redirect: 'error' })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data: CheckResponse = await res.json()
+        if (!cancelled) { setResults(data.results); setLoading(false) }
+      } catch (e) {
+        if (!cancelled) { setError(e instanceof Error ? e.message : String(e)); setLoading(false) }
+      }
+    }
+    run()
+    return () => { cancelled = true }
+  }, [])
+
+  const statusBadge = (ok: boolean | undefined) => ok ? (
+    <span style={{ color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600, marginRight: 4 }}>✓</span>
+  ) : (
+    <span style={{ color: 'var(--dsw-alias-state-error-primary)', fontWeight: 600, marginRight: 4 }}>✗</span>
+  )
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={onClose}>
+      <div style={{ background: 'var(--dsw-alias-bg-layer-3,#1e1e1e)', borderRadius: 12, border: '1px solid var(--dsw-alias-border-l2,#333)', maxWidth: 640, width: '90%', maxHeight: '80vh', overflowY: 'auto', padding: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 18, fontWeight: 700, color: 'var(--dsw-alias-label-primary)' }}>
+            <LucideSearch size={18} />
+            智能检测
+          </span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--dsw-alias-label-tertiary)', padding: 4, display: 'grid', placeItems: 'center' }}>
+            <LucideX size={16} />
+          </button>
+        </div>
+
+        {loading && (
+          <div style={{ textAlign: 'center', padding: 40, fontSize: 14, color: 'var(--dsw-alias-label-tertiary)' }}>
+            <div style={{ marginBottom: 12, color: 'var(--dsw-alias-brand-primary)' }}>
+              <LucideLoader size={32} />
+            </div>
+            正在检测所有渠道，请稍候…
+          </div>
+        )}
+
+        {error && (
+          <div style={{ padding: 16, background: 'var(--dsw-alias-bg-layer-2)', borderRadius: 8, border: '1px solid var(--dsw-alias-state-error-primary)', fontSize: 13, color: 'var(--dsw-alias-state-error-primary)' }}>
+            检测失败：{error}
+          </div>
+        )}
+
+        {results && results.length === 0 && (
+          <div style={{ padding: 20, textAlign: 'center', fontSize: 13, color: 'var(--dsw-alias-label-tertiary)' }}>
+            暂无渠道配置，请在设置页添加渠道后重试。
+          </div>
+        )}
+
+        {results && results.map((r, i) => (
+          <div key={i} style={{ marginBottom: 12, padding: 14, borderRadius: 10, border: '1px solid var(--dsw-alias-border-l2,#333)', background: 'var(--dsw-alias-bg-layer-2,#252525)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 999, background: r.type === 'image' ? 'color-mix(in srgb, var(--dsw-alias-brand-primary) 20%, transparent)' : 'color-mix(in srgb, var(--dsw-alias-state-success-primary) 20%, transparent)', color: r.type === 'image' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-state-success-primary)' }}>
+              {r.type === 'image' ? <LucideImageCc size={12} /> : <LucideFilm size={12} />}
+              {r.type === 'image' ? '出图' : '视频'}
+            </span>
+              <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>{r.name}</span>
+              <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', marginLeft: 'auto' }}>{r.model}</span>
+            </div>
+            <div style={{ fontSize: 12, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {statusBadge(r.keyConfigured)}
+              <span style={{ color: 'var(--dsw-alias-label-secondary)' }}>API Key</span>
+              {r.error && <span style={{ color: 'var(--dsw-alias-state-error-primary)', fontSize: 11 }}>{r.error}</span>}
+            </div>
+            {r.type === 'image' && r.textToImage && (
+              <div style={{ fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                {statusBadge(r.textToImage.ok)}
+                <span style={{ color: 'var(--dsw-alias-label-secondary)' }}>文生图</span>
+                {r.textToImage.detail && <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>({r.textToImage.detail})</span>}
+              </div>
+            )}
+            {r.type === 'image' && r.imageToImage && (
+              <div style={{ fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                {statusBadge(r.imageToImage.ok)}
+                <span style={{ color: 'var(--dsw-alias-label-secondary)' }}>图生图</span>
+                {r.imageToImage.formats.length > 0 && <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>({r.imageToImage.formats.join('、')})</span>}
+              </div>
+            )}
+            {r.type === 'video' && r.textToVideo && (
+              <div style={{ fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                {statusBadge(r.textToVideo.ok)}
+                <span style={{ color: 'var(--dsw-alias-label-secondary)' }}>文生视频</span>
+                {r.textToVideo.detail && <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>({r.textToVideo.detail})</span>}
+              </div>
+            )}
+            {r.type === 'video' && r.imageToVideo && (
+              <div style={{ fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                {statusBadge(r.imageToVideo.ok)}
+                <span style={{ color: 'var(--dsw-alias-label-secondary)' }}>图生视频</span>
+                {r.imageToVideo.detail && <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>({r.imageToVideo.detail})</span>}
+              </div>
+            )}
+          </div>
+        ))}
+
+        {results && results.length > 0 && (
+          <div style={{ marginTop: 12, fontSize: 12, color: 'var(--dsw-alias-label-tertiary)', textAlign: 'center' }}>
+            检测完成，共 {results.length} 个渠道
+          </div>
+        )}
+      </div>
     </div>
   )
 }

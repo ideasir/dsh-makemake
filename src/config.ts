@@ -18,6 +18,8 @@ export interface Config {
   }>
   selectedImageChannel?: string
   selectedVideoChannel?: string
+  /** 用户当前激活的生成模式（点工具栏图标切换）：'image' | 'video' | null */
+  activeMode?: 'image' | 'video' | null
 }
 
 const channelSchema = Schema.object({
@@ -34,4 +36,5 @@ export const Config: Schema<Config> = Schema.object({
   videoChannels: Schema.array(channelSchema).default([]),
   selectedImageChannel: Schema.string().default(''),
   selectedVideoChannel: Schema.string().default(''),
+  activeMode: Schema.union(['image', 'video']).nullable().optional(),
 })
