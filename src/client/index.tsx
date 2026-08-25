@@ -35,6 +35,8 @@ interface MakemakeSettings {
 // 同时镜像到 scope.activeMode（服务端 systemPrompt 读取，告诉模型当前模式）
 // 图片/视频互斥：'image' | 'video' | null
 let activeBadge: 'image' | 'video' | null = null
+// 已发送消息的激活模式队列（气泡左侧图标用）：发送时推入 { mode, channelName }
+let sentBadgeQueue: Array<{ mode: 'image' | 'video'; channelName: string }> = []
 
 interface SettingsFace {
   scope: SettingsScope<MakemakeSettings>
@@ -245,10 +247,80 @@ export function apply(ctx: Context): void {
     inject: (): { scope: SettingsScope<MakemakeSettings> } => ({ scope }),
   }, (props: { scope: SettingsScope<MakemakeSettings> }) => <MakeMakeButtons scope={props.scope} />))
 
-  // ─── 消息气泡前缀注入 ──────────────────────────────────
-  // 用户点击「出图」按钮后，发送时自动在提示词前加「出图：」或「出视频：」
-  // 这样气泡里直接显示"出图：一只猫"，模型读了也知道是出图请求
-  // 同时保留 activeMode 给服务端 systemPrompt 用（备用方案）
+  // ─── 消息气泡前缀注入 + 气泡左侧图标 ──────────────────────────────────
+  // 1) 用户点击「出图」按钮后，发送时自动在提示词前加「出图：」或「出视频：」前缀
+  // 2) 同时记录 { mode, channelName } 到队列，气泡渲染后在其左侧外部贴图片图标+通道名小字
+  ctx.effect(() => {
+    const style = document.createElement('style')
+    style.dataset.plugin = 'dsh-makemake-msg-badge'
+    style.textContent = `
+  [data-chat-flow-kind="user"]{position:relative}
+  [data-chat-flow-kind="user"] .dsh-mm-msg-badge{position:absolute;z-index:5;pointer-events:none;display:flex;flex-direction:column;align-items:center;gap:2px;left:-9999px;top:-9999px;color:var(--dsw-alias-label-tertiary)}
+  [data-chat-flow-kind="user"] .dsh-mm-msg-badge svg{width:14px;height:14px}
+  [data-chat-flow-kind="user"] .dsh-mm-msg-badge .dsh-mm-badge-ch{font-size:9px;line-height:1;white-space:nowrap;opacity:.75}
+  `
+    document.head.appendChild(style)
+
+    // 持久化 key→{mode,channelName} 映射表（localStorage，刷新后恢复）
+    const STORAGE_KEY = 'dsh-mm-msg-badge-map'
+    let badgeMap: Record<string, { mode: 'image' | 'video'; channelName: string }> = (() => {
+      try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') } catch { return {} }
+    })()
+    const persist = () => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(badgeMap)) } catch { /* ignore */ } }
+
+    const imageSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>'
+    const videoSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="14" height="16" rx="2" ry="2"/><path d="m16 8 4-2.5v13L16 16"/></svg>'
+
+    const tick = () => {
+      const nodes = Array.from(document.querySelectorAll<HTMLElement>('[data-chat-flow-kind="user"]'))
+      // 新节点（不在映射表、队列有值）→ 分配并持久化
+      for (const node of nodes) {
+        const key = node.dataset.chatAnchorKey ?? ''
+        if (!key || badgeMap[key]) continue
+        const item = sentBadgeQueue.shift()
+        if (!item) continue
+        badgeMap[key] = item
+        persist()
+      }
+      // 渲染图标：从持久化映射表读取
+      for (const node of nodes) {
+        const key = node.dataset.chatAnchorKey ?? ''
+        if (!key) continue
+        const item = badgeMap[key]
+        if (!item) continue
+        let badge = node.querySelector<HTMLElement>('.dsh-mm-msg-badge')
+        if (!badge) {
+          badge = document.createElement('div')
+          badge.className = 'dsh-mm-msg-badge'
+          node.appendChild(badge)
+        }
+        // 内容只在首次创建时写入（避免每 400ms 重写 DOM）
+        if (!badge.dataset.rendered) {
+          badge.innerHTML = (item.mode === 'image' ? imageSvg : videoSvg) + `<span class="dsh-mm-badge-ch">${item.channelName}</span>`
+          badge.dataset.rendered = '1'
+        }
+        // 动态定位：图标贴气泡左边缘外侧，顶部对齐
+        const nodeRect = node.getBoundingClientRect()
+        let minLeft = Infinity
+        let top = 0
+        for (const el of Array.from(node.querySelectorAll('*'))) {
+          if ((el as HTMLElement).classList?.contains('dsh-mm-msg-badge')) continue
+          const r = el.getBoundingClientRect()
+          if (r.width <= 0 || r.height <= 0) continue
+          const isLeaf = el.children.length === 0 && (el.textContent ?? '').trim().length > 0
+          const hasImg = el.tagName === 'IMG' || !!el.querySelector('img')
+          if (!isLeaf && !hasImg) continue
+          if (r.left < minLeft) { minLeft = r.left; top = r.top }
+        }
+        if (minLeft !== Infinity) {
+          badge.style.left = `${minLeft - nodeRect.left - 34}px`
+          badge.style.top = `${top - nodeRect.top}px`
+        }
+      }
+    }
+    const iv = setInterval(tick, 400)
+    return () => { clearInterval(iv); style.remove() }
+  }, 'dsh-makemake: message badge')
 }
 
 function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) {
@@ -300,9 +372,14 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
       const ta = taSel()
       if (!ta || document.activeElement !== ta) return
       if (!activeBadge) return
-      // 注入前缀：只加一次，先检查是否已有前缀，避免重复
+      // 注入前缀 + 记录渠道名（气泡左侧图标用）
       const prefix = activeBadge === 'image' ? '出图：' : '出视频：'
       const cur = ta.value
+      // 记录本次发送的渠道名
+      const chs = activeBadge === 'image' ? (settings.imageChannels ?? []) : (settings.videoChannels ?? [])
+      const selId = activeBadge === 'image' ? settings.selectedImageChannel : settings.selectedVideoChannel
+      const chName = chs.find(c => c.id === selId)?.name ?? chs[0]?.name ?? (activeBadge === 'image' ? '图片' : '视频')
+      sentBadgeQueue.push({ mode: activeBadge, channelName: chName })
       // 已带前缀（用户手动输入过）则不重复加
       if (!cur.startsWith(prefix)) {
         // 用 React 受控组件的 setter 更新值 + 触发 input 事件
