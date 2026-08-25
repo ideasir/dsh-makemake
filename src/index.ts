@@ -504,18 +504,17 @@ export function apply(ctx: Context, config: Config = {}): void {
           const normalizeImageUrl = (url: string) => url.replace(/^https?:\/\/[^/]+/, dshUrl.origin)
           const normalizedSrcImage = normalizeImageUrl(srcImage)
 
-          // 按「已选渠道优先，其次其余渠道」排序
+          // 纯透传：只使用当前选定的渠道，绝不遍历其他渠道
           const selectedId = settings.selectedImageChannel
-          // 如果用户通过 /渠道名 指定了渠道，则只用该渠道
-          let targetChannels = channels
+          // 如果用户通过 /渠道名 指定了渠道，则优先按名称匹配
+          let target: Channel | undefined
           const channelArg = (args as { channel?: string }).channel?.trim()
           if (channelArg) {
-            const byName = channels.filter(c => c.name === channelArg || `${c.name}`.includes(channelArg))
-            if (byName.length > 0) targetChannels = byName
+            target = channels.find(c => c.name === channelArg || `${c.name}`.includes(channelArg))
           }
-          const sorted = selectedId
-            ? [...targetChannels].sort((a, b) => (a.id === selectedId ? 0 : 1))
-            : targetChannels
+          if (!target) target = channels.find(c => c.id === selectedId) ?? channels[0]
+          if (!target) throw new Error('未配置图片生成渠道，请在设置页添加渠道。')
+          const sorted = [target]
 
           const lastErr: string[] = []
           for (const ch of sorted) {
@@ -672,16 +671,17 @@ export function apply(ctx: Context, config: Config = {}): void {
       }
       // 注意：这里不消费 activeMode！必须等生成成功才清空（见下方 return），
       // 否则 API 失败时模型重试会被硬闸门拒绝。
-      const selectedId = settings.selectedVideoChannel
-      const sorted = selectedId ? [...channels].sort((a, b) => (a.id === selectedId ? 0 : 1)) : channels
-      // 如果用户通过 /渠道名 指定了渠道，则只用该渠道
-      let targetChannels = sorted
-      const channelArg = (args as { channel?: string }).channel?.trim()
-      if (channelArg) {
-        const byName = channels.filter(c => c.name === channelArg || `${c.name}`.includes(channelArg))
-        if (byName.length > 0) targetChannels = byName
-      }
-      const duration = args.duration ?? '5s'
+      // 纯透传：只使用当前选定的视频渠道
+          const selectedId = settings.selectedVideoChannel
+          let target: Channel | undefined
+          const channelArg = (args as { channel?: string }).channel?.trim()
+          if (channelArg) {
+            target = channels.find(c => c.name === channelArg || `${c.name}`.includes(channelArg))
+          }
+          if (!target) target = channels.find(c => c.id === selectedId) ?? channels[0]
+          if (!target) throw new Error('未配置视频生成渠道，请在设置页添加渠道。')
+          const sorted = [target]
+          const duration = args.duration ?? '5s'
       const lastErr: string[] = []
 
       // 图生视频：解析参考图 → 读出字节 → 转 data URL（与图片工具一致）
@@ -736,7 +736,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         }
       }
 
-      for (const ch of targetChannels) {
+      for (const ch of sorted) {
         const cred = await ctx.credentials.resolve(channelCredentialRef(ch.id))
         if (!cred?.value) { lastErr.push(`渠道「${ch.name}」未配置 API Key`); continue }
         const pool = getKeyPool(ch.id, cred.value)
