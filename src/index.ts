@@ -510,8 +510,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           const isImg2Img = !!normalizedSrcImage
           let iteration = 0
           if (isImg2Img) {
-            img2imgCount += 1
-            iteration = img2imgCount
+            iteration = img2imgCount + 1  // 预计算，不提交（失败时重试不跳数）
           } else {
             img2imgCount = 0
           }
@@ -621,6 +620,8 @@ export function apply(ctx: Context, config: Config = {}): void {
             // 生成成功后才消费 activeMode（handleResponse 可能抛错，失败时保留给重试）
             const result = await handleResponse(response)
             void scope.update({ activeMode: null }).catch(() => {})
+            // 成功后才提交迭代计数（失败时 img2imgCount 不变，重试不跳数）
+            if (isImg2Img) img2imgCount = iteration
             return result
             } catch (e) {
               // 失败：保留 activeMode（模型可重试），不消费
