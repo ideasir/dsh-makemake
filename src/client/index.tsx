@@ -1044,21 +1044,32 @@ function ImageResultCard(props: ImageCardProps) {
 
   let prompt = ''
   let channelLabel = ''
+  let iterLabel = ''
   for (const tb of textBlocks) {
     const t = tb.text ?? ''
     if (!t.trim()) continue
-    // render() 输出：`渠道名 · 提示词`（或旧格式 `已生成图片：xxx`）
+    // render() 输出：`渠道名 图生图(N) · 提示词`（或旧格式 `已生成图片：xxx`）
     if (/已生成图片|已生成视频/.test(t)) {
       const match = t.match(/：(.+)$/)
       if (match && match[1]) prompt = match[1]
     } else if (t.includes('·')) {
       const parts = t.split('·')
-      channelLabel = (parts[0] ?? '').trim()
+      const head = (parts[0] ?? '').trim()
+      // 拆出迭代标签：'Agnes 图生图(2)' → channel='Agnes', iter='图生图(2)'
+      const iterMatch = head.match(/^(.*?)\s*(图生图\(\d+\))$/)
+      if (iterMatch?.[2]) {
+        channelLabel = (iterMatch[1] ?? '').trim()
+        iterLabel = iterMatch[2]
+      } else {
+        channelLabel = head
+      }
       prompt = parts.slice(1).join('·').trim()
     } else {
       prompt = t.trim()
     }
   }
+  // 提示词最多显示 10 个字，超出省略号；悬停 title 显示完整内容
+  const truncatePrompt = (s: string) => s.length > 10 ? s.slice(0, 10) + '…' : s
 
   if (block.isError) {
     return <div style={{ padding: '8px 12px', fontSize: 13, color: 'var(--dsw-alias-state-error-primary)', background: 'var(--dsw-alias-bg-layer-3)', borderRadius: 8, marginTop: 4 }}>图片生成失败：{block.error?.message ?? '未知错误'}</div>
@@ -1126,16 +1137,21 @@ function ImageResultCard(props: ImageCardProps) {
                   <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>
                     {att.width}×{att.height} · {(att.bytes / 1024).toFixed(0)} KB
                   </span>
-                  {/* 渠道名 + 提示词 */}
+                  {/* 渠道名 + 迭代标签 + 提示词 */}
                   {channelLabel && (
                     <span style={{ fontSize: 10, color: 'var(--dsw-alias-label-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>
                       {channelLabel}
                     </span>
                   )}
+                  {iterLabel && (
+                    <span style={{ fontSize: 10, color: 'var(--dsw-alias-brand-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                      {iterLabel}
+                    </span>
+                  )}
                   {prompt && (
                     <span style={{ fontSize: 10, color: 'var(--dsw-alias-label-tertiary)', flex: 1,
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, cursor: 'default' }}
-                      title={prompt}>{prompt}</span>
+                      title={prompt}>{truncatePrompt(prompt)}</span>
                   )}
                   {/* 复制（紧跟提示词） */}
                   <button id={`copy-btn-${i}`} onClick={(e) => {
