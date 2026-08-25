@@ -257,7 +257,7 @@ export function apply(ctx: Context): void {
       style.dataset.plugin = 'dsh-makemake-msg-icon'
       style.textContent = `
   [data-chat-flow-kind="user"]{position:relative}
-  [data-chat-flow-kind="user"] .dsh-mm-msg-label{position:absolute;z-index:5;pointer-events:none;font-size:11px;font-weight:500;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2,#2c2c2e);border:1px solid var(--dsw-alias-border-l2,#444);border-radius:4px;padding:0 5px;line-height:16px;white-space:nowrap;top:-8px;right:-8px}
+  [data-chat-flow-kind="user"] .dsh-mm-msg-label{position:absolute;z-index:5;pointer-events:none;font-size:11px;font-weight:500;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2,#2c2c2e);border:1px solid var(--dsw-alias-border-l2,#444);border-radius:4px;padding:0 5px;line-height:16px;white-space:nowrap;top:4px;right:4px}
   `
       document.head.appendChild(style)
 
