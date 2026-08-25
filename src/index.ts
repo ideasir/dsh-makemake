@@ -532,13 +532,16 @@ export function apply(ctx: Context, config: Config = {}): void {
             const cred = await ctx.credentials.resolve(channelCredentialRef(ch.id))
             if (!cred?.value) { lastErr.push(`渠道「${ch.name}」未配置 API Key`); continue }
             const pool = getKeyPool(ch.id, cred.value)
-            const sk = pool.next()
-                        if (!sk) { lastErr.push(`渠道「${ch.name}」所有 Key 都在冷却中`); continue }
-                        const baseURL = ch.baseURL.replace(/\/+$/, '')
-                        const model = ch.model
-                        let response: Response
-                        try {
-                          // 抽取响应处理逻辑，避免代码重复
+            // 循环试所有 Key（一个失败自动试下一个，全部试完才报错）
+            const maxRetries = pool.size
+            for (let trial = 0; trial < maxRetries; trial++) {
+              const sk = pool.next()
+              if (!sk) break
+              const baseURL = ch.baseURL.replace(/\/+$/, '')
+              const model = ch.model
+              let response: Response
+              try {
+                // 抽取响应处理逻辑，避免代码重复
                         async function handleResponse(r: Response): Promise<{ attachment: ImageAttachmentRef; model: string; output: string; prompt: string; channelName: string; fileSize: number; iteration?: number }> {
                           let data: Uint8Array
                           let mediaType: ImageAttachmentRef['mediaType'] = 'image/png'
@@ -625,13 +628,17 @@ export function apply(ctx: Context, config: Config = {}): void {
             return result
             } catch (e) {
               // 失败：保留 activeMode（模型可重试），不消费
-              // 标记当前 Key 冷却（429/限流场景），下次换 Key 重试
-              pool.fail(sk)
               const msg = e instanceof Error ? e.message : String(e)
-              // 尝试提取 HTTP 状态码（"HTTP 401: xxx" / "HTTP 401"）
               const m = msg.match(/HTTP (\d{3})/)
-              lastErr.push(`渠道「${ch.name}」(${ch.baseURL}): ${classifyError(m ? parseInt(m[1], 10) : undefined, msg)}`)
+              const httpCode = m ? parseInt(m[1], 10) : 0
+              // 只对 429/限流冷却 Key，其他错误（超时/5xx/网络）不冷却
+              if (httpCode === 429 || httpCode === 408 || /timeout|ECONNRESET/i.test(msg)) {
+                pool.fail(sk, httpCode === 429 ? 60_000 : 10_000)
+              }
+              lastErr.push(`渠道「${ch.name}」(${ch.baseURL}): ${classifyError(httpCode || undefined, msg)}`)
+              // 不 return——继续内层循环试下一个 Key
             }
+            } // 内层 Key 循环结束
           }
           // 图片生成失败——只报当前渠道
           const detail = lastErr.join('\n')
