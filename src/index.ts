@@ -464,7 +464,7 @@ export function apply(ctx: Context, config: Config = {}): void {
             attachmentId: { type: 'string', required: true }, mediaType: { type: 'string', required: true }, bytes: { type: 'integer', required: true }, width: { type: 'integer', required: true }, height: { type: 'integer', required: true }, name: { type: 'string' },
           } },
           model: { type: 'string', required: true }, output: { type: 'string', required: true }, prompt: { type: 'string', required: true },
-          channelName: { type: 'string' }, fileSize: { type: 'integer' }, iteration?: number,
+          channelName: { type: 'string' }, fileSize: { type: 'integer' }, iteration: { type: 'integer' },
         },
       },
       render: (_args, value) => {
