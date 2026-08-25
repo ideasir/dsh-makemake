@@ -15,6 +15,9 @@ import { MAKEMAKESKILL } from './skill.js'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 
+/** 图生图迭代计数：同一张图（attachmentId hash）连续生成时累加，换新图则重置 */
+const img2imgCounters = new Map<string, number>()
+
 export { Config } from './config.js'
 export { IMAGE_ROUTE } from './shared.js'
 
@@ -461,13 +464,16 @@ export function apply(ctx: Context, config: Config = {}): void {
             attachmentId: { type: 'string', required: true }, mediaType: { type: 'string', required: true }, bytes: { type: 'integer', required: true }, width: { type: 'integer', required: true }, height: { type: 'integer', required: true }, name: { type: 'string' },
           } },
           model: { type: 'string', required: true }, output: { type: 'string', required: true }, prompt: { type: 'string', required: true },
-          channelName: { type: 'string' }, fileSize: { type: 'integer' },
+          channelName: { type: 'string' }, fileSize: { type: 'integer' }, iteration?: number,
         },
       },
       render: (_args, value) => {
+        // 图生图时加迭代标签：「图生图(2)」、「图生图(3)」
+        const iterTag = value.iteration && value.iteration > 1 ? ` 图生图(${value.iteration})` : ''
+        const label = value.channelName ? `${value.channelName}` : ''
         return [
           { type: 'image', attachment: value.attachment },
-          { type: 'text', text: `${value.channelName ?? ''} · ${value.prompt}` },
+          { type: 'text', text: `${label}${iterTag} · ${value.prompt}` },
         ]
       },
       presentationMeta: (args, value) => ({
@@ -478,7 +484,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         // 注意：不传 attachment，attachment 由 render() 的 content blocks 渲染
       }),
     },
-    async execute(args, exec): Promise<{ attachment: ImageAttachmentRef; model: string; output: string; prompt: string; channelName: string; fileSize: number }> {
+    async execute(args, exec): Promise<{ attachment: ImageAttachmentRef; model: string; output: string; prompt: string; channelName: string; fileSize: number; iteration?: number }> {
           const settings = current() as unknown as RuntimeSettings
           const channels: Channel[] = settings.imageChannels ?? []
           if (channels.length === 0) throw new Error('未配置图片生成渠道，请在设置页添加渠道。')
@@ -500,6 +506,16 @@ export function apply(ctx: Context, config: Config = {}): void {
           const dshUrl = new URL(`http://127.0.0.1:3080`)
           const normalizeImageUrl = (url: string) => url.replace(/^https?:\/\/[^/]+/, dshUrl.origin)
           const normalizedSrcImage = normalizeImageUrl(srcImage)
+          // 识别图生图：传了参考图（attachmentId / URL / 本地路径）即为图生图
+          // 迭代计数：同一张图（attachmentId hash）连续生成时 iteration+1，换新图从 1 重新计
+          const isImg2Img = !!normalizedSrcImage
+          let iteration = 0
+          if (isImg2Img) {
+            // 取 attachmentId 的 hash 作为图片标识（URL/本地路径用原始字符串做 key）
+            const am = normalizedSrcImage.match(/attachmentId=(sha256:[0-9a-f]+)/)
+            const imgKey = am?.[1] ?? normalizedSrcImage
+            iteration = (img2imgCounters.get(imgKey) ?? 0) + 1
+          }
 
           // 纯透传：只使用当前选定的渠道，绝不遍历其他渠道
           const selectedId = settings.selectedImageChannel
@@ -551,7 +567,7 @@ export function apply(ctx: Context, config: Config = {}): void {
                           if (data.byteLength > maxBytes) throw new Error(`图片超出 ${maxBytes} 字节限制`)
                           if (!ctx.attachments.imageLimits.mediaTypes.includes(mediaType)) throw new Error(`不支持 ${mediaType} 格式`)
                           const attachment = await ctx.attachments.saveImage({ data, mediaType, name: 'generated-image' })
-                          return { attachment, model, output: resolvedSize, prompt: args.prompt, channelName: ch.name, fileSize: data.byteLength }
+                          return { attachment, model, output: resolvedSize, prompt: args.prompt, channelName: ch.name, fileSize: data.byteLength, iteration }
                         }
 
                         if (normalizedSrcImage) {
@@ -606,6 +622,12 @@ export function apply(ctx: Context, config: Config = {}): void {
             // 生成成功后才消费 activeMode（handleResponse 可能抛错，失败时保留给重试）
             const result = await handleResponse(response)
             void scope.update({ activeMode: null }).catch(() => {})
+            // 更新迭代计数：成功才累加，换图从 1 开始，失败不消耗
+            if (isImg2Img && result.attachment.attachmentId) {
+              const am = normalizedSrcImage.match(/attachmentId=(sha256:[0-9a-f]+)/)
+              const imgKey = am?.[1] ?? normalizedSrcImage
+              img2imgCounters.set(imgKey, iteration)
+            }
             return result
             } catch (e) {
               // 失败：保留 activeMode（模型可重试），不消费
