@@ -468,8 +468,8 @@ export function apply(ctx: Context, config: Config = {}): void {
         },
       },
       render: (_args, value) => {
-        // 图生图时加迭代标签：从第1次就开始显示「图生图(1)」、「图生图(2)」…
-        const iterTag = value.iteration && value.iteration >= 1 ? ` 图生图(${value.iteration})` : ''
+        // 图生图时显示迭代次数：迭代×1、迭代×2、迭代×3…（同一张图连续生成累加）
+        const iterTag = value.iteration && value.iteration >= 1 ? ` 迭代×${value.iteration}` : ''
         const label = value.channelName ? `${value.channelName}` : ''
         return [
           { type: 'image', attachment: value.attachment },

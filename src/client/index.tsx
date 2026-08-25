@@ -1125,15 +1125,15 @@ function ImageResultCard(props: ImageCardProps) {
   for (const tb of textBlocks) {
     const t = tb.text ?? ''
     if (!t.trim()) continue
-    // render() 输出：`渠道名 图生图(N) · 提示词`（或旧格式 `已生成图片：xxx`）
+    // render() 输出：`渠道名 迭代×N · 提示词`（或旧格式 `已生成图片：xxx`）
     if (/已生成图片|已生成视频/.test(t)) {
       const match = t.match(/：(.+)$/)
       if (match && match[1]) prompt = match[1]
     } else if (t.includes('·')) {
       const parts = t.split('·')
       const head = (parts[0] ?? '').trim()
-      // 拆出迭代标签：'Agnes 图生图(2)' → channel='Agnes', iter='图生图(2)'
-      const iterMatch = head.match(/^(.*?)\s*(图生图\(\d+\))$/)
+      // 拆出迭代标签：'Agnes 迭代×2' → channel='Agnes', iter='迭代×2'
+      const iterMatch = head.match(/^(.*?)\s*(迭代×\d+)$/)
       if (iterMatch?.[2]) {
         channelLabel = (iterMatch[1] ?? '').trim()
         iterLabel = iterMatch[2]
