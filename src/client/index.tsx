@@ -527,7 +527,7 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
 
 function MakemakePluginCard(props: CardProps) {
   const [open, setOpen] = useState(false)
-  const [version, setVersion] = useState('0825-0.1.1-rc.2')
+  const [version, setVersion] = useState('0826-0.1.2-rc.2')
   const [hasUpdate, setHasUpdate] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [showCheckModal, setShowCheckModal] = useState(false)
