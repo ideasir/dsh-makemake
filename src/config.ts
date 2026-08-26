@@ -27,6 +27,7 @@ const channelSchema = Schema.object({
   name: Schema.string().required(),
   baseURL: Schema.string().required(),
   model: Schema.string().required(),
+  adapt: Schema.any(),
 })
 
 /** Cordis configuration schema — must match all fields written by the client. */
@@ -36,5 +37,5 @@ export const Config: Schema<Config> = Schema.object({
   videoChannels: Schema.array(channelSchema).default([]),
   selectedImageChannel: Schema.string().default(''),
   selectedVideoChannel: Schema.string().default(''),
-  activeMode: Schema.union(['image', 'video']).nullable().optional(),
+  activeMode: Schema.any(),
 })

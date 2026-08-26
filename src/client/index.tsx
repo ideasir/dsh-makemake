@@ -177,7 +177,11 @@ export function apply(ctx: Context): void {
       if (key === lastKey) return
       lastKey = key
       const backdrop = document.querySelector('.uV2eYG_backdrop')
-      const host = backdrop?.parentElement ?? document.querySelector('.uV2eYG_grow')
+      const host = backdrop?.parentElement
+        ?? document.querySelector('.uV2eYG_grow')
+        // 稳定兜底：优先用框架提供的 textarea 锚点（带 data-phase），
+        // 避免 UI 哈希类名改版而找不到宿主。定位可能不如原哈希类精确，仅作 fallback。
+        ?? document.querySelector<HTMLTextAreaElement>('textarea[data-phase]')?.parentElement
       if (!host) {
         badge?.remove(); badge = null
         return
@@ -685,7 +689,7 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
           const cred = await pluginSettings.setCredential(credentialRef(editing.id), chKey.trim())
           if (!cred.ok) throw new Error(cred.error)
         }
-        const updated = current.map((ch: any) => ch.id === editing.id ? { ...ch, name: chName, baseURL: chBaseURL, model: chModel, pollMode: chPollMode } : ch)
+        const updated = current.map((ch) => ch.id === editing.id ? { ...ch, name: chName, baseURL: chBaseURL, model: chModel, pollMode: chPollMode } : ch)
         await scope.set(key, updated)
       }
       setSaveMsg('✓ 已保存')
@@ -700,7 +704,7 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
     const key = type === 'image' ? 'imageChannels' : 'videoChannels'
     const allChannels = type === 'image' ? imageChannels : videoChannels
     const current = [...allChannels]
-    await scope.set(key, current.filter((ch: any) => ch.id !== id))
+    await scope.set(key, current.filter((ch) => ch.id !== id))
   }
 
   // 渠道检测
@@ -786,6 +790,7 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
           setChName={setChName} setChBaseURL={setChBaseURL} setChModel={setChModel} setChKey={setChKey}
           setKeyConfigured={setKeyConfigured} setEditing={setEditing} saveMsg={saveMsg}
           testChannel={testChannel} testState={testState} testResult={testResult}
+          pluginSettings={pluginSettings}
         />
       )}
       {openPanel === 'video' && (
@@ -802,6 +807,7 @@ function PluginBody({ scope, pluginSettings }: { scope: SettingsScope<MakemakeSe
           setChName={setChName} setChBaseURL={setChBaseURL} setChModel={setChModel} setChKey={setChKey}
           setKeyConfigured={setKeyConfigured} setEditing={setEditing} saveMsg={saveMsg}
           testChannel={testChannel} testState={testState} testResult={testResult}
+          pluginSettings={pluginSettings}
         />
       )}
     </>
@@ -813,7 +819,7 @@ function VideoChannelPanel({
   chPollMode, setChPollMode,
   inputStyle, fieldStyle, labelStyle, startEdit, saveChannel, deleteChannel,
   setChName, setChBaseURL, setChModel, setChKey, setKeyConfigured, setEditing, saveMsg,
-  testChannel, testState, testResult,
+  testChannel, testState, testResult, pluginSettings,
 }: any) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -864,99 +870,16 @@ function VideoChannelPanel({
       }}>+ 添加渠道</button>
 
       {editing && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12, background: 'var(--dsw-alias-bg-layer-2)', borderRadius: 8 }}>
-          <div style={fieldStyle}>
-            <label style={labelStyle}>渠道名称</label>
-            <input style={inputStyle} value={chName} onChange={e => setChName(e.target.value)} placeholder={type === 'image' ? '如：精品出图' : '如：视频生成'} />
-          </div>
-          <div style={fieldStyle}>
-            <label style={labelStyle}>接口地址</label>
-            <input style={inputStyle} value={chBaseURL} onChange={e => setChBaseURL(e.target.value)} placeholder={type === 'image' ? 'https://api.openai.com/v1' : 'https://api.example.com/v1'} />
-          </div>
-          <div style={fieldStyle}>
-            <label style={labelStyle}>模型名</label>
-            <input style={inputStyle} value={chModel} onChange={e => setChModel(e.target.value)} placeholder={type === 'image' ? 'gpt-image-2' : 'sora'} />
-          </div>
-          <div style={fieldStyle}>
-                              <label style={labelStyle}>API Key（每行一个，自动轮询）</label>
-                              <textarea style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }} autoComplete="off" value={chKey} onChange={e => setChKey(e.target.value)}
-                                placeholder={keyConfigured ? '留空保持已配置的 Key' : '每行一个 API Key\n自动轮询，429/限流自动跳过'} />
-                              {keyConfigured && <span style={{ fontSize: 11, color: 'var(--dsw-alias-state-success-primary)' }}>✓ Key 已配置</span>}
-                            </div>
-                            <div style={fieldStyle}>
-                              <label style={labelStyle}>轮询方式</label>
-                              <div style={{ display: 'flex', gap: 8 }}>
-                                <button type="button" onClick={() => setChPollMode('round-robin')}
-                                  style={{ flex: 1, padding: '6px 10px', fontSize: 12, borderRadius: 6, cursor: 'pointer',
-                                    border: chPollMode === 'round-robin' ? '2px solid var(--dsw-alias-brand-primary)' : '1px solid var(--dsw-alias-border-l2)',
-                                    background: chPollMode === 'round-robin' ? 'color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent)' : 'transparent',
-                                    color: 'var(--dsw-alias-label-primary)' }}>轮询（轮流使用）</button>
-                                <button type="button" onClick={() => setChPollMode('sequential')}
-                                  style={{ flex: 1, padding: '6px 10px', fontSize: 12, borderRadius: 6, cursor: 'pointer',
-                                    border: chPollMode === 'sequential' ? '2px solid var(--dsw-alias-brand-primary)' : '1px solid var(--dsw-alias-border-l2)',
-                                    background: chPollMode === 'sequential' ? 'color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent)' : 'transparent',
-                                    color: 'var(--dsw-alias-label-primary)' }}>顺序（用完再换）</button>
-                              </div>
-                            </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center' }}>
-            {saveMsg && (
-              <span style={{ fontSize: 12, color: saveMsg.startsWith('✓') ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>
-                {saveMsg}
-              </span>
-            )}
-            <button onClick={() => setEditing(null)} style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent', cursor: 'pointer' }}>取消</button>
-            <button onClick={() => { void testChannel() }} disabled={testState === 'testing'}
-              style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6, border: '1px solid var(--dsw-alias-brand-primary)', background: 'transparent', color: 'var(--dsw-alias-brand-primary)', cursor: testState === 'testing' ? 'wait' : 'pointer', opacity: testState === 'testing' ? 0.6 : 1 }}>
-              {testState === 'testing' ? '检测中…' : (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><LucideSearch size={12} /> 检测</span>
-              )}
-            </button>
-            <button onClick={saveChannel} style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6, border: 'none', background: 'var(--dsw-alias-state-success-primary)', color: '#fff', cursor: 'pointer' }}>保存</button>
-          </div>
-          {testState === 'done' && testResult && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 10, borderRadius: 8, background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l2)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>
-                {testResult.textToImage?.ok || testResult.video?.ok ? <span style={{ color: 'var(--dsw-alias-state-success-primary)' }}>✓</span> : <span style={{ color: 'var(--dsw-alias-state-error-primary)' }}>✗</span>}
-                检测成功
-              </div>
-              {testResult.textToImage && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                  <span style={{ color: testResult.textToImage.ok ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>{testResult.textToImage.ok ? '✓' : '✗'}</span>
-                  <span style={{ color: 'var(--dsw-alias-label-primary)' }}>文生图</span>
-                  <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>POST {testResult.textToImage.endpoint}</span>
-                  {testResult.textToImage.detail && (
-                    <span style={{ color: testResult.textToImage.ok ? 'var(--dsw-alias-label-caption)' : 'var(--dsw-alias-state-error-primary)', fontSize: 11 }}>({testResult.textToImage.detail})</span>
-                  )}
-                </div>
-              )}
-              {testResult.imageToImage && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                  <span style={{ color: testResult.imageToImage.ok ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>{testResult.imageToImage.ok ? '✓' : '✗'}</span>
-                  <span style={{ color: 'var(--dsw-alias-label-primary)' }}>图生图</span>
-                  <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>POST {testResult.imageToImage.endpoint}</span>
-                  {testResult.imageToImage.formats.length > 0 && (
-                    <span style={{ color: 'var(--dsw-alias-label-caption)', fontSize: 11 }}>({testResult.imageToImage.formats.join('、')})</span>
-                  )}
-                </div>
-              )}
-              {testResult.video && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                  <span style={{ color: testResult.video.ok ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>{testResult.video.ok ? '✓' : '✗'}</span>
-                  <span style={{ color: 'var(--dsw-alias-label-primary)' }}>文生视频</span>
-                  <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>POST {testResult.video.endpoint}</span>
-                </div>
-              )}
-              {testResult.videoToImage && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                  <span style={{ color: testResult.videoToImage.ok ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>{testResult.videoToImage.ok ? '✓' : '✗'}</span>
-                  <span style={{ color: 'var(--dsw-alias-label-primary)' }}>图生视频</span>
-                  <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>POST {testResult.videoToImage.endpoint}</span>
-                </div>
-              )}
-              {testResult.error && <div style={{ fontSize: 11, color: 'var(--dsw-alias-state-error-primary)' }}>{testResult.error}</div>}
-            </div>
-          )}
-        </div>
+        <ChannelEditModal
+          type={editing.type} editingId={editing.id}
+          chName={chName} chBaseURL={chBaseURL} chModel={chModel} chKey={chKey} keyConfigured={keyConfigured}
+          chPollMode={chPollMode}
+          setChName={setChName} setChBaseURL={setChBaseURL} setChModel={setChModel} setChKey={setChKey}
+          setChPollMode={setChPollMode} setKeyConfigured={setKeyConfigured} setEditing={setEditing}
+          saveChannel={saveChannel} saveMsg={saveMsg}
+          testChannel={testChannel} testState={testState} testResult={testResult}
+          scope={scope} pluginSettings={pluginSettings}
+        />
       )}
     </div>
   )
@@ -1032,7 +955,17 @@ const MODAL_ANIM = `
 `
 
 // ─── Image result card ──────────────────────────────────────────────────────
-interface ContentBlock { type: string; text?: string; attachment?: { attachmentId: string; previewUrl?: string } }
+interface ContentBlock {
+  type: string
+  text?: string
+  attachment?: {
+    attachmentId: string
+    previewUrl?: string
+    width?: number
+    height?: number
+    bytes?: number
+  }
+}
 function ImageResultCard(props: ImageCardProps) {
   const block = props.block as { content?: ContentBlock[]; isError?: boolean; error?: { code?: string; message?: string } }
   const [modalUrl, setModalUrl] = useState<string | null>(null)
@@ -1116,8 +1049,8 @@ function ImageResultCard(props: ImageCardProps) {
   }, [zoom, offset])
 
   if (!block?.content) return null
-  const imageBlocks = block.content.filter((b: any) => b.type === 'image' && b.attachment)
-  const textBlocks = block.content.filter((b: any) => b.type === 'text' && b.text)
+  const imageBlocks = block.content.filter((b) => b.type === 'image' && b.attachment)
+  const textBlocks = block.content.filter((b) => b.type === 'text' && b.text)
 
   let prompt = ''
   let channelLabel = ''
@@ -1149,7 +1082,8 @@ function ImageResultCard(props: ImageCardProps) {
   const truncatePrompt = (s: string) => s.length > 10 ? s.slice(0, 10) + '…' : s
 
   if (block.isError) {
-    return <div style={{ padding: '8px 12px', fontSize: 13, color: 'var(--dsw-alias-state-error-primary)', background: 'var(--dsw-alias-bg-layer-3)', borderRadius: 8, marginTop: 4 }}>图片生成失败：{block.error?.message ?? '未知错误'}</div>
+    const errText = block.error?.message || block.content?.map((b: any) => b.text).filter(Boolean).join('\n') || '未知错误'
+    return <div style={{ padding: '8px 12px', fontSize: 13, color: 'var(--dsw-alias-state-error-primary)', background: 'var(--dsw-alias-bg-layer-3)', borderRadius: 8, marginTop: 4, wordBreak: 'break-word' }}>图片生成失败：{errText}</div>
   }
 
   if (imageBlocks.length > 0) {
@@ -1169,7 +1103,7 @@ function ImageResultCard(props: ImageCardProps) {
   }
 
   return <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4, width: '100%' }}>
-      {imageBlocks.map((b: any, i: number) => {
+      {imageBlocks.map((b, i: number) => {
         const att = b.attachment
         const url = `${window.location.origin}/plugins/dsh-makemake/image?attachmentId=${att?.attachmentId}`
         return (
@@ -1212,7 +1146,7 @@ function ImageResultCard(props: ImageCardProps) {
                   </button>
                   {/* 分辨率 + 大小 */}
                   <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                    {att.width}×{att.height} · {(att.bytes / 1024).toFixed(0)} KB
+                    {att.width}×{att.height} · {((att.bytes ?? 0) / 1024).toFixed(0)} KB
                   </span>
                   {/* 渠道名 + 迭代标签 + 提示词 */}
                   {channelLabel && (
@@ -1259,7 +1193,7 @@ function ImageResultCard(props: ImageCardProps) {
           </div>
         )
       })}
-      {textBlocks.length > 0 && imageBlocks.length === 0 && <p style={{ margin: 0, fontSize: 13, color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1.5 }}>{textBlocks.map((b: any) => b.text).join('')}</p>}
+      {textBlocks.length > 0 && imageBlocks.length === 0 && <p style={{ margin: 0, fontSize: 13, color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1.5 }}>{textBlocks.map((b) => b.text).join('')}</p>}
       {modalUrl && (
         <div className={`dsh-mm-modal ${dragging ? 'dragging' : ''} ${closing ? 'closing' : ''}`} onClick={closeModal}>
           <button className="dsh-mm-modal-close" onClick={closeModal}><LucideX size={18} /></button>
@@ -1282,21 +1216,49 @@ function VideoResultCard(props: ImageCardProps) {
   const [modalUrl, setModalUrl] = useState<string | null>(null)
 
   if (!block?.content) return null
-  const textBlocks = block.content.filter((b: any) => b.type === 'text' && b.text)
+  const textBlocks = block.content.filter((b) => b.type === 'text' && b.text)
 
   if (block.isError) {
-    return <div style={{ padding: '8px 12px', fontSize: 13, color: 'var(--dsw-alias-state-error-primary)', background: 'var(--dsw-alias-bg-layer-3)', borderRadius: 8, marginTop: 4 }}>视频生成失败：{block.error?.message ?? '未知错误'}</div>
+    const errText = block.error?.message || block.content?.map((b: any) => b.text).filter(Boolean).join('\n') || '未知错误'
+    return <div style={{ padding: '8px 12px', fontSize: 13, color: 'var(--dsw-alias-state-error-primary)', background: 'var(--dsw-alias-bg-layer-3)', borderRadius: 8, marginTop: 4, wordBreak: 'break-word' }}>视频生成失败：{errText}</div>
   }
 
-  // 从 text 里提取视频 URL
-  const fullText = textBlocks.map((b: any) => b.text).join('\n')
+  const fullText = textBlocks.map((b) => b.text).join('\n')
+  const lines = fullText.split('\n').map(l => l.trim())
+  // 视频 URL：第一个 http(s) 令牌
   const urlMatch = fullText.match(/https?:\/\/[^\s）)\]]+/)
   const videoUrl = urlMatch ? urlMatch[0] : ''
-  // 提示词描述（去掉 URL 和标题行）
+  // 标题行：🎬 已生成视频 · channel · dur
+  const titleLine = lines.find(l => l.startsWith('🎬 已生成视频'))
+  const titleParts = (titleLine ?? '').replace(/🎬 已生成视频\s*·\s*/, '').split('·').map(s => s.trim())
+  const channelName = titleParts[0] ?? ''
+  const duration = titleParts[1] ?? ''
+  // 元数据行：尺寸 1088x832 · 时长 5.0s · 2.3 MB · 迭代×2
+  const metaLine = lines.find(l => l.startsWith('尺寸 ')) ?? ''
+  const size = metaLine.match(/尺寸\s*([^\s·]+)/)?.[1] ?? ''
+  const seconds = metaLine.match(/时长\s*([^\s·]+)s/)?.[1] ?? ''
+  const sizeMb = metaLine.match(/([\d.]+)\s*MB/)?.[1] ?? ''
+  const iterLabel = metaLine.match(/迭代×(\d+)/) ? `迭代×${metaLine.match(/迭代×(\d+)/)![1]}` : ''
+  // 引用简码：`引用：视频N` → videoCode=视频N，引用按钮插入 [视频N]。
+  const videoCode = (fullText.match(/引用：(\S+)/)?.[1] ?? '').trim()
+  // 提示词描述：去掉标题行、元数据行和 URL
   const desc = fullText
     .replace(/https?:\/\/[^\s）)\]]+/g, '')
     .replace(/🎬 已生成视频[^\n]*\n?/, '')
+    .replace(/尺寸 [^\n]*\n?/, '')
     .trim()
+  const truncatePrompt = (s: string) => s.length > 10 ? s.slice(0, 10) + '…' : s
+
+  // 视频引用 = 插入一个短且唯一的注册简码 `[视频N]`（有特征、不透明、不吃解码）。
+  // 模型拿到 [视频N] 后，经插件注册表定位到该视频 URL，再用 makemake_video 延续。
+  const refVideo = () => {
+    const tag = videoCode ? `[${videoCode}]` : ''
+    if (!tag) return
+    const ta = document.querySelector<HTMLTextAreaElement>('textarea[data-phase]')
+    if (!ta) return
+    ta.value = ta.value ? `${ta.value} ${tag}` : tag
+    ta.focus()
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4, maxWidth: 480, alignItems: 'flex-start' }}>
@@ -1314,18 +1276,30 @@ function VideoResultCard(props: ImageCardProps) {
       ) : (
         <p style={{ margin: 0, fontSize: 13, color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1.5 }}>{fullText}</p>
       )}
-      <div style={{ display: 'flex', gap: 5, alignItems: 'center', maxWidth: '100%', flexWrap: 'wrap' }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--dsw-alias-label-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}><LucideFilm size={12} /> 视频</span>
-        <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }} title={desc}>{desc || '已生成'}</span>
-        {videoUrl && (
-          <button onClick={(e) => { e.stopPropagation(); window.open(videoUrl, '_blank', 'noreferrer') }}
-            style={{ flex: 'none', fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
-            onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'var(--dsw-alias-bg-layer-1)' }}
+      {/* 元数据行 —— 与图片卡片完全同构：引用按钮最左，随后 尺寸·大小·时长 / 渠道 / 迭代 / 提示词 */}
+      {videoUrl && (
+        <div style={{ display: 'flex', gap: 5, alignItems: 'center', maxWidth: '100%', flexWrap: 'nowrap' }}>
+          <button onClick={refVideo} title="引用此视频到对话框（视频延续/视频生视频）"
+            style={{ flex: 'none', width: 26, height: 26, borderRadius: 6, border: 'none', background: 'transparent', cursor: 'pointer', display: 'grid', placeItems: 'center', color: 'var(--dsw-alias-brand-primary)', transition: 'background .12s' }}
+            onMouseEnter={e => { (e.target as HTMLButtonElement).style.background = 'color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent)' }}
             onMouseLeave={e => { (e.target as HTMLButtonElement).style.background = 'transparent' }}>
-            新窗口打开
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+            </svg>
           </button>
-        )}
-      </div>
+          {(size || sizeMb || seconds) && (
+            <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+              {size}{sizeMb ? ` · ${sizeMb} MB` : ''}{seconds ? ` · ${seconds}s` : ''}
+            </span>
+          )}
+          {channelName && <span style={{ fontSize: 10, color: 'var(--dsw-alias-label-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>{channelName}</span>}
+          {iterLabel && <span style={{ fontSize: 10, color: 'var(--dsw-alias-brand-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>{iterLabel}</span>}
+          {videoCode && <span style={{ fontSize: 10, color: 'var(--dsw-alias-brand-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}>[{videoCode}]</span>}
+          {desc && (
+            <span style={{ fontSize: 10, color: 'var(--dsw-alias-label-tertiary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, cursor: 'default' }} title={desc}>{truncatePrompt(desc)}</span>
+          )}
+        </div>
+      )}
       {modalUrl && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,.82)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }} onClick={() => setModalUrl(null)}>
           <video src={modalUrl} controls autoPlay playsInline style={{ maxWidth: '92vw', maxHeight: '88vh', borderRadius: 10 }} />
@@ -1457,6 +1431,286 @@ function CheckModal({ pluginSettings, onClose }: { pluginSettings: PluginSetting
             检测完成，共 {results.length} 个渠道
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+function ChannelEditModal({
+  type, editingId, chName, chBaseURL, chModel, chKey, keyConfigured,
+  chPollMode, setChName, setChBaseURL, setChModel, setChKey,
+  setChPollMode, setKeyConfigured, setEditing,
+  saveChannel, saveMsg,
+  testChannel, testState, testResult,
+  scope, pluginSettings,
+}: any) {
+  const [models, setModels] = useState<string[]>([])
+  const [modelsLoading, setModelsLoading] = useState(false)
+  const [epResults, setEpResults] = useState<Array<{ name: string; ok: boolean; [k: string]: any }> | null>(null)
+  const [epState, setEpState] = useState<'idle' | 'checking' | 'done' | 'error'>('idle')
+  const [epError, setEpError] = useState<string | null>(null)
+  const [adaptData, setAdaptData] = useState<Record<string, any> | null>(null)
+
+  const fetchModels = async () => {
+    if (!chBaseURL) return
+    setModelsLoading(true)
+    try {
+      const body: Record<string, string> = { baseURL: chBaseURL.replace(/\/+$/, ''), apiKey: (chKey.trim().split('\n')[0] ?? '').trim() }
+      if (!body.apiKey && editingId && !editingId.startsWith('new-')) body.channelId = editingId
+      const res = await fetch('/plugins/dsh-makemake/models', {
+        method: 'POST', redirect: 'error',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      if (data.models?.length > 0) {
+        setModels(data.models)
+        // 自动推荐第一个匹配的模型
+        const allImg = data.classified?.image ?? []
+        const allVid = data.classified?.video ?? []
+        const candidates = type === 'image' ? allImg : allVid
+        if (candidates.length > 0 && !chModel) {
+          setChModel(candidates[0])
+        }
+      }
+    } catch (e) {
+      console.error('获取模型列表失败', e)
+    }
+    setModelsLoading(false)
+  }
+
+  const checkEndpoints = async () => {
+    if (!chBaseURL || !chModel) return
+    setEpState('checking'); setEpResults(null); setEpError(null)
+    try {
+      const body: Record<string, string> = {
+              type, baseURL: chBaseURL.replace(/\/+$/, ''), model: chModel,
+              apiKey: (chKey.trim().split('\n')[0] ?? '').trim(),
+            }
+      if (!body.apiKey && editingId && !editingId.startsWith('new-')) body.channelId = editingId
+      const res = await fetch('/plugins/dsh-makemake/check-endpoints', {
+        method: 'POST', redirect: 'error',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      // 后端返回 { ok, endpoints: [...] }，取数组
+      const endpoints = Array.isArray(data.endpoints) ? data.endpoints : []
+      setEpResults(endpoints)
+      // 从检测结果构建 adapt 配置
+      const adapt: Record<string, any> = {}
+      for (const e of endpoints) {
+        if (e.name === '文生图' && e.ok) adapt.imageEndpoint = e.path
+        if (e.name === '视频提交' && e.ok) adapt.videoEndpoint = e.path
+        if (e.name === '任务轮询' && e.ok) { adapt.videoPollPath = e.pollUrl; adapt.videoPollMethod = e.method }
+        if (e.name === '图生视频' && e.ok) adapt.i2vDetail = e.detail
+      }
+      setAdaptData(Object.keys(adapt).length > 0 ? adapt : null)
+      setEpState('done')
+    } catch (e) {
+      setEpState('error')
+      setEpError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  // 保存渠道（带上适配结果 adapt）
+  const saveWithAdapt = async () => {
+    if (!editingId) return
+    const key = type === 'image' ? 'imageChannels' : 'videoChannels'
+    try {
+      const snap = scope.getSnapshot() as any
+      const value = snap?.value ?? snap ?? {}
+      const allChannels = (type === 'image' ? value.imageChannels : value.videoChannels) ?? []
+      const current = [...allChannels]
+      const isNew = editingId.startsWith('new-')
+      if (isNew) {
+        const newId = `ch-${Date.now()}`
+        const newCh = { id: newId, name: chName || chModel, baseURL: chBaseURL, model: chModel, pollMode: chPollMode, adapt: adaptData ?? undefined }
+        if (chKey.trim()) await pluginSettings.setCredential(credentialRef(newId), chKey.trim())
+        await scope.set(key, [...current, newCh])
+      } else {
+        if (chKey.trim()) await pluginSettings.setCredential(credentialRef(editingId), chKey.trim())
+        const updated = current.map((ch: any) => ch.id === editingId
+          ? { ...ch, name: chName, baseURL: chBaseURL, model: chModel, pollMode: chPollMode, adapt: adaptData ?? ch.adapt }
+          : ch)
+        await scope.set(key, updated)
+      }
+      setEditing(null)
+    } catch (e) {
+      console.error('保存失败', e)
+    }
+  }
+
+  const inputStyle = {
+    boxSizing: 'border-box' as const, width: '100%', padding: '8px 12px',
+    fontSize: 13, border: '1px solid var(--dsw-alias-border-l2)',
+    borderRadius: 8, background: 'var(--dsw-alias-bg-layer-3)', color: 'inherit', outline: 'none',
+  } as const
+  const fieldStyle = { display: 'grid', gap: 6 } as const
+  const labelStyle = { fontSize: 13, fontWeight: 500, color: 'var(--dsw-alias-label-primary)' } as const
+  const statusBadge = (ok: boolean) => (
+    <span style={{ color: ok ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)', fontWeight: 600, fontSize: 13 }}>
+      {ok ? '✓' : '✗'}
+    </span>
+  )
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)',
+    }}>
+      <div style={{
+        width: 600, maxHeight: '90vh', overflow: 'auto',
+        background: 'var(--dsw-alias-bg-layer-3,#1e1e1e)', borderRadius: 16,
+        border: '1px solid var(--dsw-alias-border-l2,#333)',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+      }}>
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--dsw-alias-border-l2,#333)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 16, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>
+            {editingId?.startsWith('new-') ? '添加渠道' : '编辑渠道'}
+          </span>
+          <button onClick={() => setEditing(null)} style={{
+            background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--dsw-alias-label-tertiary)',
+            width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>✕</button>
+        </div>
+
+        <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* 渠道配置区块 */}
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--dsw-alias-label-primary)', marginBottom: 4 }}>渠道配置</div>
+
+          <div style={fieldStyle}>
+            <label style={labelStyle}>渠道名称</label>
+            <input style={inputStyle} value={chName} onChange={e => setChName(e.target.value)}
+              placeholder={type === 'image' ? '如：精品出图' : '如：视频生成'} />
+          </div>
+          <div style={fieldStyle}>
+            <label style={labelStyle}>接口地址</label>
+            <input style={inputStyle} value={chBaseURL} onChange={e => setChBaseURL(e.target.value)}
+              placeholder={type === 'image' ? 'https://api.openai.com/v1' : 'https://api.example.com/v1'} />
+          </div>
+          <div style={fieldStyle}>
+            <label style={labelStyle}>API Key（每行一个，自动轮询）</label>
+            <textarea style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }} autoComplete="off" value={chKey}
+              onChange={e => setChKey(e.target.value)}
+              placeholder={keyConfigured ? '留空保持已配置的 Key' : '每行一个 API Key\n自动轮询，429/限流自动跳过'} />
+            {keyConfigured && <span style={{ fontSize: 11, color: 'var(--dsw-alias-state-success-primary)' }}>✓ Key 已配置</span>}
+          </div>
+          <div style={fieldStyle}>
+            <label style={labelStyle}>轮询方式</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" onClick={() => setChPollMode('round-robin')}
+                style={{
+                  flex: 1, padding: '6px 10px', fontSize: 12, borderRadius: 6, cursor: 'pointer',
+                  border: chPollMode === 'round-robin' ? '2px solid var(--dsw-alias-brand-primary)' : '1px solid var(--dsw-alias-border-l2)',
+                  background: chPollMode === 'round-robin' ? 'color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent)' : 'transparent',
+                  color: 'var(--dsw-alias-label-primary)',
+                }}>轮询（轮流使用）</button>
+              <button type="button" onClick={() => setChPollMode('sequential')}
+                style={{
+                  flex: 1, padding: '6px 10px', fontSize: 12, borderRadius: 6, cursor: 'pointer',
+                  border: chPollMode === 'sequential' ? '2px solid var(--dsw-alias-brand-primary)' : '1px solid var(--dsw-alias-border-l2)',
+                  background: chPollMode === 'sequential' ? 'color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent)' : 'transparent',
+                  color: 'var(--dsw-alias-label-primary)',
+                }}>顺序（用完再换）</button>
+            </div>
+          </div>
+
+          {/* 模型配置区块 */}
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--dsw-alias-label-primary)', marginTop: 8, marginBottom: 4 }}>模型配置</div>
+
+          <div style={fieldStyle}>
+            <label style={labelStyle}>模型名</label>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input style={{ ...inputStyle, flex: 1 }} value={chModel} onChange={e => setChModel(e.target.value)}
+                placeholder={type === 'image' ? 'gpt-image-2' : 'agnes-video-v2.0'} list="model-list" />
+              <button type="button" onClick={() => { void fetchModels() }} disabled={modelsLoading || !chBaseURL}
+                style={{
+                  flexShrink: 0, fontSize: 12, padding: '8px 12px', borderRadius: 6, cursor: modelsLoading ? 'wait' : 'pointer',
+                  border: '1px solid var(--dsw-alias-brand-primary, #4c78ff)',
+                  background: 'transparent', color: 'var(--dsw-alias-brand-primary, #4c78ff)',
+                  whiteSpace: 'nowrap', opacity: (!chBaseURL || modelsLoading) ? 0.6 : 1,
+                }}>
+                {modelsLoading ? '获取中…' : '🔍 获取模型列表'}
+              </button>
+            </div>
+            {models.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                {models.map(m => (
+                  <button key={m} type="button" onClick={() => setChModel(m)}
+                    style={{
+                      fontSize: 11, padding: '2px 8px', borderRadius: 999, cursor: 'pointer',
+                      border: chModel === m ? '2px solid var(--dsw-alias-brand-primary)' : '1px solid var(--dsw-alias-border-l2)',
+                      background: chModel === m ? 'color-mix(in srgb, var(--dsw-alias-brand-primary) 15%, transparent)' : 'transparent',
+                      color: 'var(--dsw-alias-label-secondary)',
+                    }}>{m}</button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 操作按钮 */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center', marginTop: 8 }}>
+            {saveMsg && (
+              <span style={{ fontSize: 12, color: saveMsg.startsWith('✓') ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>
+                {saveMsg}
+              </span>
+            )}
+            <button onClick={() => { void checkEndpoints() }} disabled={epState === 'checking'}
+              style={{
+                fontSize: 12, padding: '6px 14px', borderRadius: 6,
+                border: '1px solid var(--dsw-alias-brand-primary)',
+                background: 'transparent', color: 'var(--dsw-alias-brand-primary)',
+                cursor: epState === 'checking' ? 'wait' : 'pointer', opacity: epState === 'checking' ? 0.6 : 1,
+              }}>
+              {epState === 'checking' ? '检测中…' : '🔍 检测'}
+            </button>
+            <button onClick={() => { void saveWithAdapt() }}
+              style={{
+                fontSize: 12, padding: '6px 14px', borderRadius: 6, border: 'none',
+                background: 'var(--dsw-alias-state-success-primary)', color: '#fff', cursor: 'pointer',
+              }}>保存</button>
+          </div>
+
+          {/* 端点检测结果 */}
+          {epState === 'done' && epResults && Array.isArray(epResults) && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 12, borderRadius: 8, background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l2)' }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--dsw-alias-label-primary)', marginBottom: 4 }}>端点检测结果</div>
+              {epResults.map((e: any, i: number) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                  <span style={{ color: e.warn ? 'var(--dsw-alias-state-warning-primary, #f0a020)' : (e.ok ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)') }}>
+                    {e.warn ? '⚠' : (e.ok ? '✓' : '✗')}
+                  </span>
+                  <span style={{ color: 'var(--dsw-alias-label-primary)' }}>{e.name}</span>
+                  {e.path && <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>{e.path}</span>}
+                  {e.status && <span style={{ color: 'var(--dsw-alias-label-caption)', fontSize: 11 }}>(HTTP {e.status})</span>}
+                  {e.detail && <span style={{ color: e.ok ? 'var(--dsw-alias-label-caption)' : 'var(--dsw-alias-state-error-primary)', fontSize: 11 }}>{e.detail}</span>}
+                  {e.formats && <span style={{ color: 'var(--dsw-alias-label-caption)', fontSize: 11 }}>({e.formats.join('、')})</span>}
+                  {e.pollUrl && <span style={{ color: 'var(--dsw-alias-label-caption)', fontSize: 11 }}>轮询: {e.pollUrl} ({e.method})</span>}
+                  {e.reason && <span style={{ color: 'var(--dsw-alias-state-error-primary)', fontSize: 11 }}>{e.reason}</span>}
+                </div>
+              ))}
+              {/* 写入适配 */}
+              <button type="button" onClick={() => { setEpState('idle'); setEpResults(null); void saveWithAdapt() }}
+                style={{
+                  marginTop: 8, fontSize: 12, padding: '6px 14px', borderRadius: 6, cursor: 'pointer',
+                  border: 'none',
+                  background: 'var(--dsw-alias-state-success-primary)',
+                  color: '#fff', alignSelf: 'flex-start',
+                }}>
+                ✓ 保存适配结果
+              </button>
+            </div>
+          )}
+          {epState === 'error' && epError && (
+            <div style={{ fontSize: 12, color: 'var(--dsw-alias-state-error-primary)', padding: 8, border: '1px solid var(--dsw-alias-state-error-primary)', borderRadius: 8 }}>
+              检测失败：{epError}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

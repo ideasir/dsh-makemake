@@ -1,5 +1,51 @@
 # CHANGES.md
 
+## 2026-08-26 - 渠道适配开放化（检测→适配→保存）+ 多Key轮询修复 + 编辑弹窗
+
+### 需求背景
+主任要求视频/图片渠道**不写死**——用户填 baseURL + Key + 模型名，系统自动探测正确端点并适配，换任何 provider 都能用。同时渠道编辑从下拉内嵌表单改为**独立弹窗**，检测结果逐端点展示并支持"一键适配"。
+
+### 解决方案
+1. **渠道编辑改弹窗**（`src/client/index.tsx`）：VideoChannelPanel 的内嵌编辑表单 → 独立 `ChannelEditModal` 居中弹窗
+   - 渠道配置区：渠道名 / 接口地址 / API Key（多行轮询）/ 轮询方式（轮询/顺序）
+   - 模型配置区：模型名输入 + "🔍 获取模型列表"按钮（调 `/models` 路由，自动识别出图/出视频模型）
+   - 逐端点检测：文生图 / 图生图 / 视频提交 / 图生视频 / 任务轮询，每项 ✓/✗/⚠
+   - "✓ 保存适配结果"：把检测到的端点路径写入渠道 `adapt` 字段
+2. **逐端点检测路由**（`src/index.ts` `/check-endpoints`）：不穷举显示，每能力只报一行，找到通的就停
+   - 图片：试 `/v1/images/generations` → `/images/generations`，图生图复用端点测格式
+   - 视频：试 `/v1/videos` → `/videos` → `/video/generations` → `/tasks`
+   - 图生视频、任务轮询（发真实请求看返回 task_id 推断轮询方式）
+3. **模型列表路由**（`/models`）：查 `/v1/models`，按关键词自动归类出图/出视频模型
+4. **401 语义修正**：401 = 端点存在但 Key 无效（⚠ 黄色），不再误判为失败或成功；404 = 端点不存在（✗）
+5. **多Key轮询修复**（关键）：
+   - **根因**：YAML 单引号字符串里 `\n` 是**字面反斜杠+n**，不是换行符。后端 `split(/[\n\r,;]+/)` 匹配不到，整串当 1 个 Key 发出去 → 401
+   - `KeyPool` 构造函数加 `normalize`：`raw.replace(/\\n/g,'\n')` 把字面 `\n` 转真实换行再拆分
+   - index.ts 所有 `cred.value.split()` 统一加 normalize
+   - 前端 `split('\\n')` → `split('\n')`（fetchModels 和 checkEndpoints）
+6. **baseURL 标准化**：剥掉 `/videos` 路径后缀再探测/拼接，避免 `.../videos/v1/videos` 三重嵌套
+7. **视频 URL 拼接修复**：`videoBase` 剥 `/videos` 后统一到 `/v1`，再拼 `/videos`
+8. **错误信息细化**：DSH 错误块结构是 `{name, code}` 没有 `message`，前端 `block.error?.message` 永远是 undefined → 一直显示"未知错误"。改为从 content text block 取错误信息
+9. **config.ts / channels.ts 加 `adapt` 字段**：保存适配结果（imageEndpoint/videoEndpoint/videoPollPath 等），生成时直接读，不写死
+
+### 踩坑记录
+- **`Bearer $${apiKey}` 多了个 `$`**：导致所有探测请求都带 `$sk-xxx` 错误 Key，全部 401。这是"检测全失败"的隐藏根因，排查了很久
+- **YAML 单引号 `\n` 是字面字符**：不是换行符，多Key存进去后 `split('\n')` 拆不开
+- **DSH 错误块没有 message 字段**：只有 `{name, code}`，取错误信息要从 content text block 拿
+- **patch 写正则转义陷阱**：`\/` 在 patch 参数里被多次 JSON 转义，容易写成 `\\\\/`（匹配反斜杠而非斜杠），导致 tsc TS1109 报错。需用 read_file 确认实际字节
+
+### 验证
+- `npx tsc --noEmitOnError false` + `npx tsdown` 构建成功
+- DSH 重启后 127.0.0.1:3080 正常
+- 用真实 Agnes 渠道测 `/models` 路由：成功返回 9 个模型并正确分类
+- 19 个 Key 逐个直接打 Agnes API 均返回 200（证明多Key拆分正确，429 是 Agnes 1分钟/账号限流）
+
+### 修改文件
+- `src/index.ts` — check-endpoints/models 路由 + 多Key normalize + baseURL 标准化 + 视频URL拼接修复 + 错误分类
+- `src/probe.ts` — 401/429 语义修正 + normalizeVideoBase + probeModelsList/classifyModels
+- `src/channels.ts` — KeyPool normalize + Channel 接口加 adapt
+- `src/config.ts` — channelSchema 加 adapt
+- `src/client/index.tsx` — ChannelEditModal 弹窗 + 模型列表 + 逐端点检测 + 错误信息细化
+
 ## 2026-08-23 (晚2) - 图生视频支持 + 检测区分文生/图生视频
 
 ### 问题
