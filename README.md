@@ -1,10 +1,6 @@
-# Make Make Plugin - DeepSeek Harness
+# Make Make
 
-图片/视频生成插件，使用 OpenAI 兼容协议，支持多渠道配置。
-
-## 版本
-- 插件版本：0825-0.1.1-rc.2
-- 适配 DSH：rc.8
+> 当前版本 `0828-0.1.2-rc.2`，适配 DSH `v0.1.1-rc.2`（开发者预览版）。为 DeepSeek Harness 提供图片和视频生成能力，AI 可以画图、生成视频。支持 Gemini、OpenAI、Seedream 等多个生成渠道。
 
 ## 功能
 - 文生图（多图生成支持）
@@ -61,7 +57,7 @@ cd /root/.dsh/profiles/web && npx dsh --profile web --port 3080 --no-open
 - 字段：
   - `imageChannels`: Channel[] - 出图渠道列表
   - `selectedImageChannel`: string - 当前选中的出图渠道 ID
-  - `videoChannels`: Channel[] - 出视频渠道列表（待开发）
+  - `videoChannels`: Channel[] - 出视频渠道列表
   - `selectedVideoChannel`: string - 当前选中的出视频渠道 ID
 
 ## 凭据管理
@@ -69,9 +65,9 @@ cd /root/.dsh/profiles/web && npx dsh --profile web --port 3080 --no-open
 - 引用格式：`MAKEMAKE_CHANNEL_<channelId>`
 
 ## 工具注册
-- 工具名：`generate_image`
-- 调用后返回附件 ID
-- 图片存储在内存 map，重启后丢失
+- `makemake_image`：AI 生图工具，返回附件 ID
+- `makemake_video`：AI 生视频工具，返回附件 ID
+- 图片/视频存储在内存 map，重启后丢失
 
 ## 图片渲染
 - 路由：`/plugins/dsh-makemake/image`

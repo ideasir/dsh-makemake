@@ -48,6 +48,9 @@ type ImageCardProps = PropsRuntime<'tool.call.toolview'> & InjectFace<{}>
 const CREATION_NAMESPACE = 'creation'
 const IMAGE_ROUTE = '/plugins/dsh-makemake/image'
 
+// 标题图标（Sparkles，与 veryIM/passpass 标题图标风格一致：Lucide stroke-width 2）
+const MakeSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .962 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.962 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>'
+
 function credentialRef(channelId: string): string {
   return `MAKEMAKE_CHANNEL_${channelId.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`
 }
@@ -527,7 +530,7 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
 
 function MakemakePluginCard(props: CardProps) {
   const [open, setOpen] = useState(false)
-  const [version, setVersion] = useState('0826-0.1.2-rc.2')
+  const [version, setVersion] = useState('0828-0.1.2-rc.2')
   const [hasUpdate, setHasUpdate] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [showCheckModal, setShowCheckModal] = useState(false)
@@ -538,7 +541,9 @@ function MakemakePluginCard(props: CardProps) {
       <button className="dsh-mm-head" onClick={() => setOpen(v => !v)}>
         <span className="dsh-mm-head-text">
           <div className="dsh-mm-name-row">
-            <span className="dsh-mm-title">Make Make</span>
+            <span className="dsh-mm-title" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span dangerouslySetInnerHTML={{ __html: MakeSvg }} />Make Make
+            </span>
             {version && <span className="dsh-mm-version-badge">{version}</span>}
           </div>
           <span className="dsh-mm-desc">支持生成图像和视频的插件。AI 可以为你画图、生成视频。</span>
