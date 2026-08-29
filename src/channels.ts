@@ -2,7 +2,7 @@
  * 渠道 & API Key 管理。
  * 集中处理：渠道凭据引用名、目标渠道解析、多 Key 轮询池与冷却。
  */
-import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import type {} from '@deepseek-ai/dsh-credentials'
 
 /** 渠道配置。 */
 export interface Channel {

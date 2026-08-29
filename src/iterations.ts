@@ -63,7 +63,6 @@ export class IterationRegistry {
   private readonly byVideoCode = new Map<string, string>()
   /** 下一个视频简码序号（单调递增，持久化，避免跨会话/重启混淆）。 */
   private nextVideoCodeNum = 1
-  private loaded = false
   private readonly loadPromise: Promise<void>
   private writeChain: Promise<void> = Promise.resolve()
 
@@ -108,8 +107,6 @@ export class IterationRegistry {
       this.trimToCapacity()
     } catch {
       // 首次运行 / 文件损坏：从空开始。
-    } finally {
-      this.loaded = true
     }
   }
 

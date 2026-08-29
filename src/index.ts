@@ -33,7 +33,7 @@ import {
   IterationRegistry, defaultIterationPath, newLineageId, nextIteration, nextVideoIteration,
 } from './iterations.js'
 import type { PlannedIteration } from './iterations.js'
-import { probeImageCapabilities, probeVideoCapabilities, autoDetectBase, probeModelsList, classifyModels, probeTextToImage, probeImageToImage, probeTextToVideo, probeImageToVideo } from './probe.js'
+import { probeImageCapabilities, probeVideoCapabilities, probeModelsList, classifyModels, probeImageToImage, probeImageToVideo } from './probe.js'
 import { resolveVideoLastFrame } from './video-frame.js'
 
 export { Config } from './config.js'

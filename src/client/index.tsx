@@ -46,10 +46,8 @@ type CardProps = PropsRuntime<'settings.plugin.item'> & InjectFace<SettingsFace>
 type ImageCardProps = PropsRuntime<'tool.call.toolview'> & InjectFace<{}>
 
 const CREATION_NAMESPACE = 'creation'
-const IMAGE_ROUTE = '/plugins/dsh-makemake/image'
 
-// 标题图标（Sparkles，与 veryIM/passpass 标题图标风格一致：Lucide stroke-width 2）
-const MakeSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .962 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.962 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>'
+const MAKE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .962 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.962 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>'
 
 function credentialRef(channelId: string): string {
   return `MAKEMAKE_CHANNEL_${channelId.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`
@@ -531,7 +529,6 @@ function MakeMakeButtons({ scope }: { scope: SettingsScope<MakemakeSettings> }) 
 function MakemakePluginCard(props: CardProps) {
   const [open, setOpen] = useState(false)
   const [version, setVersion] = useState('0828-0.1.2-rc.2')
-  const [hasUpdate, setHasUpdate] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [showCheckModal, setShowCheckModal] = useState(false)
   const { scope, pluginSettings } = props
@@ -542,7 +539,7 @@ function MakemakePluginCard(props: CardProps) {
         <span className="dsh-mm-head-text">
           <div className="dsh-mm-name-row">
             <span className="dsh-mm-title" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <span dangerouslySetInnerHTML={{ __html: MakeSvg }} />Make Make
+              <span dangerouslySetInnerHTML={{ __html: MAKE_SVG }} />Make Make
             </span>
             {version && <span className="dsh-mm-version-badge">{version}</span>}
           </div>
@@ -551,15 +548,9 @@ function MakemakePluginCard(props: CardProps) {
         <span className="dsh-mm-btns">
           <a className="dsh-mm-btn-link" href="https://github.com/ideasir/dsh-makemake" target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} title="打开 GitHub 仓库">ideasir</a>
           <button className="dsh-mm-btn-uninstall" onClick={(e: React.MouseEvent) => { e.stopPropagation(); if (confirm('确定卸载 Make Make 插件吗？\n\n将从 DSH 中移除插件本体和全部配置。')) { setFeedback('已卸载（重启后生效）'); setTimeout(() => setFeedback(null), 3000) } }} title="卸载插件">卸载</button>
-          {hasUpdate ? (
-            <button className="dsh-mm-btn-update" style={{ color: 'var(--dsw-alias-state-success-primary)', borderColor: 'color-mix(in srgb, var(--dsw-alias-state-success-primary) 45%, transparent)' }}
-              onClick={(e: React.MouseEvent) => { e.stopPropagation(); window.open('https://github.com/ideasir/dsh-makemake', '_blank', 'noreferrer') }}
-              title="发现新版本，点击前往仓库查看更新">有更新</button>
-          ) : (
-            <button className="dsh-mm-btn-update" style={{ color: 'var(--dsw-alias-label-tertiary)' }}
-              onClick={(e: React.MouseEvent) => { e.stopPropagation(); setVersion(v => v + ''); }}
-              title="当前已是最新版本（点击重新检查）">已最新</button>
-          )}
+          <button className="dsh-mm-btn-update" style={{ color: 'var(--dsw-alias-label-tertiary)' }}
+            onClick={(e: React.MouseEvent) => { e.stopPropagation(); setVersion(v => v + ''); }}
+            title="当前已是最新版本">已最新</button>
           <Button variant="outline" size="sm" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setShowCheckModal(true) }}>{'智能检测'}</Button>
           <span className={`dsh-mm-chevron ${open ? 'dsh-mm-chevron-open' : ''}`} style={{ transform: open ? 'rotate(180deg)' : 'none' }}>
             <IconChevronDownOutline14 />
@@ -1237,7 +1228,6 @@ function VideoResultCard(props: ImageCardProps) {
   const titleLine = lines.find(l => l.startsWith('🎬 已生成视频'))
   const titleParts = (titleLine ?? '').replace(/🎬 已生成视频\s*·\s*/, '').split('·').map(s => s.trim())
   const channelName = titleParts[0] ?? ''
-  const duration = titleParts[1] ?? ''
   // 元数据行：尺寸 1088x832 · 时长 5.0s · 2.3 MB · 迭代×2
   const metaLine = lines.find(l => l.startsWith('尺寸 ')) ?? ''
   const size = metaLine.match(/尺寸\s*([^\s·]+)/)?.[1] ?? ''
@@ -1556,11 +1546,6 @@ function ChannelEditModal({
   } as const
   const fieldStyle = { display: 'grid', gap: 6 } as const
   const labelStyle = { fontSize: 13, fontWeight: 500, color: 'var(--dsw-alias-label-primary)' } as const
-  const statusBadge = (ok: boolean) => (
-    <span style={{ color: ok ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)', fontWeight: 600, fontSize: 13 }}>
-      {ok ? '✓' : '✗'}
-    </span>
-  )
 
   return (
     <div style={{

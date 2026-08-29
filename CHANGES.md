@@ -194,3 +194,23 @@
 - Attachment ID 在 DSH 会话期间有效，重启后仍然存在（不同于之前的内存 map）
 - 图片渲染、预览、下载全部由 DSH 处理，插件无需关心
 - 客户端仍保留 `settings.plugin.item` 插槽用于配置界面，以及 `conversation.input.right` 插槽用于打印机图标
+
+## 2026-08-29 — 代码清理（死代码/冗余）
+
+### 清理内容
+- channels.ts：移除未使用的 credentialRef import（保留 type 副作用 import 以维持 HostContext.credentials 类型增强）
+- iterations.ts：移除从未读取的 loaded 字段（声明+finally 赋值）
+- image-route.ts：移除未使用的 MAX_BODY_BYTES 常量
+- index.ts：移除未使用的 autoDetectBase/probeTextToImage/probeTextToVideo import
+- client/index.tsx：
+  - 移除未使用的 IMAGE_ROUTE 常量
+  - MakeSvg 改名 MAKE_SVG（命名规范，唯一引用处同步）
+  - 移除 hasUpdate state 及"有更新"分支（服务端无更新检测路由，该分支永远不显示，属死代码），保留静态"已最新"按钮
+  - 移除未使用的 duration 变量
+  - 移除 ChannelEditModal 中未使用的 statusBadge 函数
+- 删除备份文件 src/index.ts.bak-20260823-fix-img2img（源码目录垃圾）
+
+### 验证
+- tsc --noEmit 通过（0 错误）
+- tsdown 构建通过（lib/client.js 103KB）
+- DSH 重启正常，无插件加载错误
