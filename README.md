@@ -1,6 +1,6 @@
 # Make Make
 
-> 当前版本 `0828-0.1.2-rc.2`，适配 DSH `v0.1.1-rc.2`（开发者预览版）。为 DeepSeek Harness 提供图片和视频生成能力，AI 可以画图、生成视频。支持 Gemini、OpenAI、Seedream 等多个生成渠道。
+> 当前版本 `0829-0.1.2-rc.2`，适配 DSH `v0.1.1-rc.2`（开发者预览版）。为 DeepSeek Harness 提供图片和视频生成能力，AI 可以画图、生成视频。支持 Gemini、OpenAI、Seedream 等多个生成渠道。
 
 ## 功能
 - 文生图（多图生成支持）

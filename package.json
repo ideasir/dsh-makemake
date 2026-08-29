@@ -1,7 +1,7 @@
 {
   "name": "dsh-makemake",
-  "version": "0828-0.1.2-rc.2",
-  "description": "Create images and videos for DeepSeek Harness — Gemini, OpenAI, Seedream & more.",
+  "version": "0829-0.1.2-rc.2",
+  "description": "Create images and videos for DeepSeek Harness \u2014 Gemini, OpenAI, Seedream & more.",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
