@@ -1,5 +1,8 @@
 # dsh-makemake 开发文档
 
+> **UI 规范：** 图标（Lucide 24×24 stroke-2）、主题（CSS 变量）、卡片结构（dsh-mm-*）统一遵循
+> `/vol1/1000/DeepSeek/DSH-UI-SPEC.md` —— 所有 ideasir 插件必须遵守，禁止硬编码颜色/非标准图标。
+
 ## 1. 项目结构
 
 ```text
