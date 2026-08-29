@@ -214,3 +214,13 @@
 - tsc --noEmit 通过（0 错误）
 - tsdown 构建通过（lib/client.js 103KB）
 - DSH 重启正常，无插件加载错误
+
+## 2026-08-29 — 图标规范化（编辑/删除按钮）
+
+### 修改
+- 渠道列表的编辑按钮：emoji ✏️ → Lucide pencil SVG（14×14 stroke-2）
+- 渠道列表的删除按钮：emoji 🗑 → Lucide trash SVG（14×14 stroke-2）
+- 关闭小图标 stroke-width 2.5 → 2（统一规范）
+
+### 规范
+遵循 /vol1/1000/DeepSeek/DSH-UI-SPEC.md：功能图标必须用 Lucide SVG，禁止 emoji。
